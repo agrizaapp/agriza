@@ -56,27 +56,40 @@ def init():
     with engine.begin() as c:
         for s in ddl: c.execute(text(s))
         email=os.getenv("ADMIN_EMAIL","admin@agriza.local").strip().lower()
-        admin_params = {
-            "n": os.getenv("ADMIN_NAME","Fabio").strip() or "Fabio",
-            "e": email,
-            "p": hpw(os.getenv("ADMIN_PASSWORD","troque-esta-senha")),
-        }
+        admin_name=os.getenv("ADMIN_NAME","Fabio").strip() or "Fabio"
+        admin_password=os.getenv("ADMIN_PASSWORD","troque-esta-senha")
+        admin_hash=hpw(admin_password)
 
-        # Cria o administrador somente se ele ainda não existir.
-        # A proteção é feita diretamente no banco para evitar erro de concorrência
-        # quando o Streamlit executa o script mais de uma vez ao mesmo tempo.
+        # Cria ou atualiza o administrador usando os dados definidos no Render.
+        # Assim, alterar ADMIN_PASSWORD no Render recupera o acesso ao sistema.
         if engine.dialect.name == "sqlite":
-            c.execute(
-                text("""INSERT OR IGNORE INTO users(name,email,password_hash,role)
-                        VALUES(:n,:e,:p,'admin')"""),
-                admin_params,
-            )
+            existing=c.execute(
+                text("SELECT id FROM users WHERE lower(email)=:e"),
+                {"e":email}
+            ).scalar()
+            if existing:
+                c.execute(
+                    text("""UPDATE users
+                            SET name=:n,password_hash=:p,role='admin',active=TRUE
+                            WHERE lower(email)=:e"""),
+                    {"n":admin_name,"p":admin_hash,"e":email}
+                )
+            else:
+                c.execute(
+                    text("""INSERT INTO users(name,email,password_hash,role,active)
+                            VALUES(:n,:e,:p,'admin',TRUE)"""),
+                    {"n":admin_name,"e":email,"p":admin_hash}
+                )
         else:
             c.execute(
-                text("""INSERT INTO users(name,email,password_hash,role)
-                        VALUES(:n,:e,:p,'admin')
-                        ON CONFLICT (email) DO NOTHING"""),
-                admin_params,
+                text("""INSERT INTO users(name,email,password_hash,role,active)
+                        VALUES(:n,:e,:p,'admin',TRUE)
+                        ON CONFLICT (email) DO UPDATE SET
+                            name=EXCLUDED.name,
+                            password_hash=EXCLUDED.password_hash,
+                            role='admin',
+                            active=TRUE"""),
+                {"n":admin_name,"e":email,"p":admin_hash}
             )
 init()
 
