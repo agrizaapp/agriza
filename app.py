@@ -55,12 +55,29 @@ def init():
     ]
     with engine.begin() as c:
         for s in ddl: c.execute(text(s))
-        email=os.getenv("ADMIN_EMAIL","admin@agriza.local").lower()
-        if not c.execute(text("SELECT id FROM users WHERE lower(email)=:e"),{"e":email}).scalar():
-            c.execute(text("""INSERT INTO users(name,email,password_hash,role)
-                         VALUES(:n,:e,:p,'admin')"""),
-                      {"n":os.getenv("ADMIN_NAME","Fabio"),"e":email,
-                       "p":hpw(os.getenv("ADMIN_PASSWORD","troque-esta-senha"))})
+        email=os.getenv("ADMIN_EMAIL","admin@agriza.local").strip().lower()
+        admin_params = {
+            "n": os.getenv("ADMIN_NAME","Fabio").strip() or "Fabio",
+            "e": email,
+            "p": hpw(os.getenv("ADMIN_PASSWORD","troque-esta-senha")),
+        }
+
+        # Cria o administrador somente se ele ainda não existir.
+        # A proteção é feita diretamente no banco para evitar erro de concorrência
+        # quando o Streamlit executa o script mais de uma vez ao mesmo tempo.
+        if engine.dialect.name == "sqlite":
+            c.execute(
+                text("""INSERT OR IGNORE INTO users(name,email,password_hash,role)
+                        VALUES(:n,:e,:p,'admin')"""),
+                admin_params,
+            )
+        else:
+            c.execute(
+                text("""INSERT INTO users(name,email,password_hash,role)
+                        VALUES(:n,:e,:p,'admin')
+                        ON CONFLICT (email) DO NOTHING"""),
+                admin_params,
+            )
 init()
 
 st.markdown("""
