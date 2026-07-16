@@ -1,22 +1,24 @@
 services:
   - type: web
-    name: agriza-app
+    name: agriza
     runtime: python
     region: oregon
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true
     healthCheckPath: /_stcore/health
+    autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: 3.12.11
       - key: DATABASE_URL
         fromDatabase:
           name: agriza-db
           property: connectionString
-      - key: ADMIN_NAME
-        value: Fabio
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
+
+databases:
+  - name: agriza-db
+    region: oregon
+    plan: free
+    databaseName: agriza
+    user: agriza
