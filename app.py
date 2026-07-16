@@ -51,46 +51,66 @@ def init():
        price_sc NUMERIC(16,2),buyer VARCHAR(180),commitment_id INTEGER,notes TEXT,created_by INTEGER)""",
     """CREATE TABLE IF NOT EXISTS quotes(
        id SERIAL PRIMARY KEY,crop VARCHAR(50),price_sc NUMERIC(16,2),
-       source VARCHAR(180),quoted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,created_by INTEGER)"""
+       source VARCHAR(180),quoted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,created_by INTEGER)""",
+    """CREATE TABLE IF NOT EXISTS app_settings(
+       setting_key VARCHAR(120) PRIMARY KEY,
+       setting_value TEXT NOT NULL)"""
     ]
     with engine.begin() as c:
-        for s in ddl: c.execute(text(s))
-        email=os.getenv("ADMIN_EMAIL","admin@agriza.local").strip().lower()
-        admin_name=os.getenv("ADMIN_NAME","Fabio").strip() or "Fabio"
-        admin_password=os.getenv("ADMIN_PASSWORD","troque-esta-senha")
-        admin_hash=hpw(admin_password)
+        for s in ddl:
+            c.execute(text(s))
 
-        # Cria ou atualiza o administrador usando os dados definidos no Render.
-        # Assim, alterar ADMIN_PASSWORD no Render recupera o acesso ao sistema.
-        if engine.dialect.name == "sqlite":
-            existing=c.execute(
-                text("SELECT id FROM users WHERE lower(email)=:e"),
-                {"e":email}
-            ).scalar()
-            if existing:
-                c.execute(
-                    text("""UPDATE users
-                            SET name=:n,password_hash=:p,role='admin',active=TRUE
-                            WHERE lower(email)=:e"""),
-                    {"n":admin_name,"p":admin_hash,"e":email}
-                )
-            else:
-                c.execute(
-                    text("""INSERT INTO users(name,email,password_hash,role,active)
-                            VALUES(:n,:e,:p,'admin',TRUE)"""),
-                    {"n":admin_name,"e":email,"p":admin_hash}
-                )
+def setup_is_complete():
+    rows=q(
+        "SELECT setting_value FROM app_settings WHERE setting_key='setup_complete'"
+    )
+    return bool(rows and rows[0]["setting_value"]=="1")
+
+def save_initial_admin(name,email,password):
+    email=email.strip().lower()
+    password_hash=hpw(password)
+
+    with engine.begin() as c:
+        # Mantém os dados existentes, mas garante que somente o novo usuário
+        # escolhido tenha permissão de administrador durante a configuração inicial.
+        c.execute(text("UPDATE users SET role='operador' WHERE role='admin'"))
+
+        existing=c.execute(
+            text("SELECT id FROM users WHERE lower(email)=:e"),
+            {"e":email}
+        ).scalar()
+
+        if existing:
+            c.execute(
+                text("""UPDATE users
+                        SET name=:n,password_hash=:p,role='admin',active=TRUE
+                        WHERE lower(email)=:e"""),
+                {"n":name.strip(),"p":password_hash,"e":email}
+            )
+            admin_id=existing
+        else:
+            result=c.execute(
+                text("""INSERT INTO users(name,email,password_hash,role,active)
+                        VALUES(:n,:e,:p,'admin',TRUE)"""),
+                {"n":name.strip(),"e":email,"p":password_hash}
+            )
+            admin_id=result.lastrowid
+
+        if engine.dialect.name=="sqlite":
+            c.execute(
+                text("""INSERT OR REPLACE INTO app_settings(setting_key,setting_value)
+                        VALUES('setup_complete','1')""")
+            )
         else:
             c.execute(
-                text("""INSERT INTO users(name,email,password_hash,role,active)
-                        VALUES(:n,:e,:p,'admin',TRUE)
-                        ON CONFLICT (email) DO UPDATE SET
-                            name=EXCLUDED.name,
-                            password_hash=EXCLUDED.password_hash,
-                            role='admin',
-                            active=TRUE"""),
-                {"n":admin_name,"e":email,"p":admin_hash}
+                text("""INSERT INTO app_settings(setting_key,setting_value)
+                        VALUES('setup_complete','1')
+                        ON CONFLICT (setting_key) DO UPDATE SET
+                        setting_value=EXCLUDED.setting_value""")
             )
+
+    return admin_id
+
 init()
 
 st.markdown("""
@@ -103,6 +123,48 @@ st.markdown("""
 
 st.markdown("# 🌱 AGRIZA")
 st.caption("AgroIA • Transformando informação em decisão.")
+
+if not setup_is_complete():
+    st.subheader("Primeira configuração")
+    st.info("Crie agora o administrador principal da AGRIZA. Esta tela aparecerá somente uma vez.")
+
+    with st.form("initial_setup"):
+        setup_name=st.text_input("Seu nome",value="Fabio")
+        setup_email=st.text_input("Seu e-mail")
+        setup_password=st.text_input("Crie uma senha",type="password")
+        setup_password_confirm=st.text_input("Confirme a senha",type="password")
+        setup_submit=st.form_submit_button(
+            "Criar administrador",
+            use_container_width=True
+        )
+
+    if setup_submit:
+        email_ok="@" in setup_email and "." in setup_email.split("@")[-1]
+        if not setup_name.strip():
+            st.error("Informe seu nome.")
+        elif not email_ok:
+            st.error("Informe um e-mail válido.")
+        elif len(setup_password)<8:
+            st.error("A senha precisa ter pelo menos 8 caracteres.")
+        elif setup_password!=setup_password_confirm:
+            st.error("As senhas não são iguais.")
+        else:
+            admin_id=save_initial_admin(
+                setup_name,
+                setup_email,
+                setup_password
+            )
+            st.session_state.user={
+                "id":admin_id,
+                "name":setup_name.strip(),
+                "email":setup_email.strip().lower(),
+                "role":"admin",
+                "active":True,
+            }
+            st.success("Administrador criado. Entrando na AGRIZA...")
+            st.rerun()
+
+    st.stop()
 
 if "user" not in st.session_state:
     with st.form("login"):
