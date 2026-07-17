@@ -57,6 +57,32 @@ apply_page_config()
 apply_global_style()
 init_db()
 
+# Migração de segurança para instalações atualizadas somente pelo GitHub Web.
+# Cria as colunas do Mercado Regional sem apagar cotações já cadastradas.
+for migration_sql in [
+    "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS region VARCHAR(120)",
+    "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_type VARCHAR(30)",
+    "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS source_url TEXT",
+]:
+    try:
+        ex(migration_sql)
+    except Exception:
+        # Em bancos que não aceitam IF NOT EXISTS, tenta criar a coluna
+        # apenas quando a consulta indicar que ela ainda não existe.
+        try:
+            column_name = migration_sql.split("EXISTS", 1)[1].strip().split()[0]
+            existing_columns = q(
+                """SELECT column_name
+                   FROM information_schema.columns
+                   WHERE table_name='quotes' AND column_name=:column""",
+                {"column": column_name},
+            )
+            if not existing_columns:
+                fallback = migration_sql.replace(" IF NOT EXISTS", "")
+                ex(fallback)
+        except Exception:
+            pass
+
 COOKIE_NAME = "agriza_remember_session"
 cookie_manager = stx.CookieManager(key="agriza_cookie_manager")
 
@@ -69,7 +95,7 @@ if "session_cleanup_done" not in st.session_state:
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
-st.caption("Versão ativa: AGRIZA 2.1 Web · atualização simples sem pastas")
+st.caption("Versão ativa: AGRIZA 2.1.1 Web · correção automática do banco")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
