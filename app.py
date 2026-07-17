@@ -24,7 +24,20 @@ from services.auth import (
 )
 from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
-from services.market_prices import update_regional_quotes, latest_quote_for_crop
+try:
+    from market_prices import update_regional_quotes, latest_quote_for_crop
+except ModuleNotFoundError:
+    def update_regional_quotes(user_id=None):
+        return {
+            "updated": [],
+            "errors": [
+                "O módulo de mercado regional não foi encontrado. "
+                "Envie o arquivo services/market_prices.py para ativar as cotações."
+            ],
+        }
+
+    def latest_quote_for_crop(crop):
+        return None
 
 
 def confirmation_card(title, rows, total_label=None, total_value=None, warnings=None):
@@ -56,7 +69,7 @@ if "session_cleanup_done" not in st.session_state:
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
-st.caption("Versão ativa: AGRIZA 2.0 · simples, automático e regional")
+st.caption("Versão ativa: AGRIZA 2.1 Web · atualização simples sem pastas")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
