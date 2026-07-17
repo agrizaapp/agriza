@@ -24,6 +24,7 @@ from services.auth import (
 )
 from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
+from services.market_prices import update_regional_quotes, latest_quote_for_crop
 
 
 def confirmation_card(title, rows, total_label=None, total_value=None, warnings=None):
@@ -55,7 +56,7 @@ if "session_cleanup_done" not in st.session_state:
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
-st.caption("Versão ativa: AGRIZA v10.3 · confirmação antes de salvar")
+st.caption("Versão ativa: AGRIZA 2.0 · simples, automático e regional")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
@@ -182,15 +183,24 @@ if top_right.button("Sair", use_container_width=True):
     st.session_state.pop("user", None)
     st.rerun()
 
+PAYMENT_OPTIONS = [
+    "Soja",
+    "Milho",
+    "Trigo",
+    "Canola",
+    "Caixa",
+    "Mais de uma",
+]
+
 pages = [
-    "🏠 Painel",
+    "🏠 Início",
+    "➕ Lançar",
     "🌾 Safras",
     "🛒 Compras",
     "🚜 Máquinas e financiamentos",
     "💰 Vendas",
+    "📈 Mercado regional",
     "🤖 AgroIA",
-    "📈 Mercado",
-    "🧪 Teste 7 dias",
 ]
 if user["role"] == "admin":
     pages.extend(["👥 Usuários", "📦 Backup"])
@@ -223,8 +233,21 @@ page = st.session_state.current_page
 # =========================================================
 # PÁGINAS
 # =========================================================
-if page == "🏠 Painel":
-    st.subheader("Painel de decisão")
+if page == "🏠 Início":
+    st.subheader("Hoje na propriedade")
+
+    a1, a2, a3 = st.columns(3)
+    if a1.button("➕ Lançar", use_container_width=True, type="primary"):
+        st.session_state.current_page = "➕ Lançar"
+        st.rerun()
+    if a2.button("📈 Ver preços", use_container_width=True):
+        st.session_state.current_page = "📈 Mercado regional"
+        st.rerun()
+    if a3.button("🤖 AgroIA", use_container_width=True):
+        st.session_state.current_page = "🤖 AgroIA"
+        st.rerun()
+
+    st.markdown("### Resumo da gestão")
     seasons = q("SELECT * FROM seasons WHERE active=TRUE ORDER BY id DESC")
 
     if not IS_POSTGRES:
@@ -325,6 +348,31 @@ if page == "🏠 Painel":
                 st.write(
                     f"• **{item['due_date']}** — {item['description']} — {money(item['total_value'])}"
                 )
+
+
+elif page == "➕ Lançar":
+    st.subheader("O que você quer lançar?")
+    st.caption("Escolha uma opção. O AGRIZA leva você direto ao lugar certo.")
+
+    c1, c2 = st.columns(2)
+    if c1.button("🛒 Nova compra", use_container_width=True, type="primary"):
+        st.session_state.current_page = "🛒 Compras"
+        st.rerun()
+    if c2.button("💰 Nova venda", use_container_width=True, type="primary"):
+        st.session_state.current_page = "💰 Vendas"
+        st.rerun()
+
+    c3, c4 = st.columns(2)
+    if c3.button("🚜 Máquina financiada", use_container_width=True):
+        st.session_state.current_page = "🚜 Máquinas e financiamentos"
+        st.rerun()
+    if c4.button("🌾 Nova safra", use_container_width=True):
+        st.session_state.current_page = "🌾 Safras"
+        st.rerun()
+
+    st.info(
+        "O sistema mostra um resumo antes de salvar e faz os cálculos automaticamente."
+    )
 
 
 elif page == "🌾 Safras":
@@ -621,14 +669,7 @@ elif page == "🛒 Compras":
         "Arrendamento",
         "Outro",
     ]
-    payment_options = [
-        "Soja",
-        "Milho",
-        "Trigo",
-        "Canola",
-        "Caixa",
-        "Mais de uma",
-    ]
+    payment_options = PAYMENT_OPTIONS
 
     def save_purchase_record(
         description,
@@ -1315,6 +1356,7 @@ elif page == "🛒 Compras":
 
 
 elif page == "🚜 Máquinas e financiamentos":
+    payment_options = PAYMENT_OPTIONS
     st.subheader("Máquinas e financiamentos")
     st.success(
         "Cadastre aqui a plantadeira e todas as parcelas da compra, "
@@ -1819,11 +1861,34 @@ elif page == "💰 Vendas":
                             st.session_state.pop("voice_sale_draft", None)
 
             with st.expander("⌨️ Lançamento manual", expanded=True):
+                first_label = list(season_map)[0]
+                first_id = season_map[first_label]
+                first_crop = q(
+                    "SELECT crop FROM seasons WHERE id=:id",
+                    {"id": first_id},
+                )[0]["crop"]
+                quote_reference = latest_quote_for_crop(first_crop)
+                suggested_price = (
+                    float(quote_reference["price_sc"])
+                    if quote_reference else 0.0
+                )
+                if quote_reference:
+                    st.info(
+                        f"Referência regional para {first_crop}: "
+                        f"{money(suggested_price)}/sc · "
+                        f"{quote_reference.get('source') or 'fonte não informada'}. "
+                        f"Você pode alterar o valor."
+                    )
+
                 with st.form("new_sale", clear_on_submit=True):
                     season_label = st.selectbox("Safra", list(season_map))
                     c1, c2 = st.columns(2)
                     quantity = c1.number_input("Quantidade (sc)", min_value=0.0)
-                    price = c2.number_input("Preço (R$/sc)", min_value=0.0)
+                    price = c2.number_input(
+                        "Preço (R$/sc)",
+                        min_value=0.0,
+                        value=suggested_price,
+                    )
                     buyer = st.text_input("Comprador/cooperativa")
                     objective = st.selectbox("Esta venda protege", list(commitment_map))
                     sale_date = st.date_input("Data da venda", value=date.today())
@@ -1982,56 +2047,91 @@ elif page == "🤖 AgroIA":
                 "safras ativas e vencimentos cadastrados."
             )
 
-elif page == "📈 Mercado":
-    st.subheader("Mercado")
+elif page == "📈 Mercado regional":
+    st.subheader("Mercado regional · Santo Ângelo")
+    st.caption(
+        "Referências de Soja, Milho, Trigo e Canola. "
+        "O valor sugerido pode ser alterado manualmente."
+    )
 
-    if CAN_EDIT:
-        with st.form("quote_form", clear_on_submit=True):
-            crop = st.selectbox("Cultura", ["Soja", "Milho", "Trigo", "Canola"])
-            price = st.number_input("Preço regional (R$/sc)", min_value=0.0)
-            source = st.text_input("Fonte", placeholder="Cooperativa, corretora, comprador...")
-            submit = st.form_submit_button("Salvar cotação", use_container_width=True)
+    if st.button("🔄 Atualizar preços agora", use_container_width=True, type="primary"):
+        with st.spinner("Buscando cotações regionais..."):
+            result = update_regional_quotes(user["id"])
+        if result["updated"]:
+            st.success(f"{len(result['updated'])} cotações atualizadas.")
+        for error in result["errors"]:
+            st.warning(error)
+        st.rerun()
 
-        if submit:
-            if price <= 0:
-                st.error("Informe um preço maior que zero.")
-            else:
-                quote_id = insert_id(
-                    """INSERT INTO quotes(crop,price_sc,source,created_by)
-                       VALUES(:c,:p,:s,:u)""",
-                    {
-                        "c": crop,
-                        "p": price,
-                        "s": source.strip(),
-                        "u": user["id"],
-                    },
-                )
-                log_action(user["id"], "criou", "cotação", quote_id, f"{crop} {price}")
-                st.success("Cotação salva.")
-                st.rerun()
+    st.info(
+        "Fonte automática inicial: Grupo Uggeri. "
+        "Agrofel e Copermil podem ser informadas manualmente quando o preço "
+        "não estiver publicado em formato automático."
+    )
 
     latest = q(
         """SELECT q1.* FROM quotes q1
            JOIN (
-             SELECT crop,MAX(quoted_at) AS max_date FROM quotes GROUP BY crop
+             SELECT crop,MAX(quoted_at) AS max_date
+             FROM quotes GROUP BY crop
            ) q2 ON q1.crop=q2.crop AND q1.quoted_at=q2.max_date
            ORDER BY q1.crop"""
     )
-    if latest:
-        cols = st.columns(min(len(latest), 4))
-        for index, item in enumerate(latest):
-            cols[index % len(cols)].metric(
-                item["crop"],
-                money(item["price_sc"]) + "/sc",
-                help=f"Fonte: {item['source'] or 'não informada'}",
+    latest_map = {item["crop"]: item for item in latest}
+    cols = st.columns(4)
+    for index, crop_name in enumerate(["Soja", "Milho", "Trigo", "Canola"]):
+        item = latest_map.get(crop_name)
+        if item:
+            cols[index].metric(crop_name, money(item["price_sc"]) + "/sc")
+            cols[index].caption(
+                f"{item.get('source') or 'Fonte não informada'}"
             )
+        else:
+            cols[index].metric(crop_name, "Sem cotação")
+
+    if CAN_EDIT:
+        with st.expander("✏️ Informar ou corrigir preço", expanded=False):
+            with st.form("regional_quote_manual", clear_on_submit=True):
+                crop = st.selectbox("Produto", ["Soja", "Milho", "Trigo", "Canola"])
+                price = st.number_input("Preço (R$/sc)", min_value=0.0, step=0.50)
+                source = st.selectbox(
+                    "Fonte",
+                    ["Agrofel", "Copermil", "Grupo Uggeri", "Outro comprador"],
+                )
+                region = st.text_input("Praça/região", value="Santo Ângelo/RS")
+                save_quote = st.form_submit_button(
+                    "Salvar preço manual", use_container_width=True
+                )
+
+            if save_quote:
+                if price <= 0:
+                    st.error("Informe um preço maior que zero.")
+                else:
+                    quote_id = insert_id(
+                        """INSERT INTO quotes
+                           (crop,price_sc,source,quoted_at,created_by,region,quote_type)
+                           VALUES(:c,:p,:s,CURRENT_TIMESTAMP,:u,:r,'manual')""",
+                        {
+                            "c": crop,
+                            "p": price,
+                            "s": source,
+                            "u": user["id"],
+                            "r": region.strip(),
+                        },
+                    )
+                    log_action(
+                        user["id"], "criou", "cotação",
+                        quote_id, f"{crop} {price} {source}"
+                    )
+                    st.success("Preço manual salvo.")
+                    st.rerun()
 
     history = q(
-        """SELECT crop,price_sc,source,quoted_at FROM quotes
-           ORDER BY quoted_at DESC LIMIT 30"""
+        """SELECT crop,price_sc,source,region,quote_type,quoted_at
+           FROM quotes ORDER BY quoted_at DESC,id DESC LIMIT 40"""
     )
     if history:
-        st.markdown("### Últimas cotações")
+        st.markdown("### Histórico recente")
         st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
 
 
