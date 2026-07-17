@@ -37,3 +37,18 @@ Foram conferidos todos os nomes utilizados no `app.py`. A revisão incluiu os
 imports de datas, pandas, arquivos ZIP, JSON, buffer em memória, conexão com o
 banco e geração/verificação de senhas. Isso elimina os erros sequenciais de
 `NameError` que apareciam nas páginas de mercado, usuários e backup.
+
+
+## Produção realizada após a colheita
+
+A safra agora guarda separadamente a produção estimada e a produção realmente
+colhida. Ao registrar o total colhido, o sistema calcula automaticamente:
+
+- produtividade real em sacas por hectare;
+- diferença em sacas e em percentual;
+- classificação: abaixo, dentro ou acima da estimativa;
+- motivo principal e uma observação opcional.
+
+Quando a produção fica abaixo do esperado, o formulário apresenta motivos
+simples como ano seco, excesso de chuva, geada, pragas, doenças e perdas na
+colheita. Os dados antigos são preservados por migração automática.

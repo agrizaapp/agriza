@@ -62,6 +62,11 @@ def init_db():
             cost_ha NUMERIC(14,2) NOT NULL,
             yield_sc_ha NUMERIC(14,2) NOT NULL,
             margin_pct NUMERIC(8,2) NOT NULL DEFAULT 20,
+            actual_production_sc NUMERIC(16,2),
+            harvest_date DATE,
+            production_result VARCHAR(30),
+            production_reason VARCHAR(120),
+            production_notes TEXT,
             active BOOLEAN NOT NULL DEFAULT TRUE,
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -137,6 +142,11 @@ def init_db():
     timestamp_column = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP" if IS_POSTGRES else "TIMESTAMP"
     add_missing_column("users", "created_at", timestamp_column)
     add_missing_column("seasons", "created_at", timestamp_column)
+    add_missing_column("seasons", "actual_production_sc", "NUMERIC(16,2)")
+    add_missing_column("seasons", "harvest_date", "DATE")
+    add_missing_column("seasons", "production_result", "VARCHAR(30)")
+    add_missing_column("seasons", "production_reason", "VARCHAR(120)")
+    add_missing_column("seasons", "production_notes", "TEXT")
     add_missing_column("commitments", "status", "VARCHAR(30) DEFAULT 'aberto'")
     add_missing_column("commitments", "created_at", timestamp_column)
     add_missing_column("sales", "created_at", timestamp_column)

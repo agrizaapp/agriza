@@ -137,7 +137,21 @@ if page == "🏠 Painel":
         summary = season_summary(season)
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Produção estimada", f"{num(summary['production'], 0)} sc")
+        if summary["actual_production"] is None:
+            c1.metric(
+                "Produção estimada",
+                f"{num(summary['estimated_production'], 0)} sc",
+            )
+        else:
+            c1.metric(
+                "Produção colhida",
+                f"{num(summary['actual_production'], 0)} sc",
+                delta=(
+                    f"{summary['variance_pct']:+.1f}% da estimativa"
+                    if summary["variance_pct"] is not None
+                    else None
+                ),
+            )
         c2.metric("Já vendido", f"{num(summary['sold_pct'])}%")
         c3.metric("Saldo livre", f"{num(summary['balance'], 0)} sc")
 
@@ -256,10 +270,173 @@ elif page == "🌾 Safras":
         with st.expander(f"🌾 {item['name']} · {item['crop']}"):
             st.write(
                 f"**{num(item['area_ha'], 0)} ha** · "
-                f"Produção estimada **{num(summary['production'], 0)} sc** · "
+                f"Estimativa **{num(summary['estimated_production'], 0)} sc** · "
                 f"Vendido **{num(summary['sold_pct'])}%**"
             )
+
+            if summary["actual_production"] is not None:
+                variation_text = (
+                    f"{summary['variance_pct']:+.1f}%"
+                    if summary["variance_pct"] is not None
+                    else "—"
+                )
+                c_real1, c_real2, c_real3 = st.columns(3)
+                c_real1.metric(
+                    "Produção colhida",
+                    f"{num(summary['actual_production'], 0)} sc",
+                )
+                c_real2.metric(
+                    "Produtividade real",
+                    f"{num(summary['actual_yield_sc_ha'], 1)} sc/ha",
+                )
+                c_real3.metric("Diferença da estimativa", variation_text)
+
+                reason = item.get("production_reason") or "Motivo não informado"
+                result_label = {
+                    "abaixo": "Abaixo do estimado",
+                    "acima": "Acima do estimado",
+                    "dentro": "Dentro do estimado",
+                }.get(item.get("production_result"), "Resultado registrado")
+                st.caption(f"**{result_label}:** {reason}")
+                if item.get("production_notes"):
+                    st.caption(item["production_notes"])
+
             if CAN_EDIT:
+                with st.expander(
+                    "🚜 Registrar ou corrigir colheita",
+                    expanded=summary["actual_production"] is None,
+                ):
+                    estimated = float(summary["estimated_production"])
+                    current_actual = float(summary["actual_production"] or 0)
+                    with st.form(f"harvest_{item['id']}"):
+                        h1, h2 = st.columns(2)
+                        harvest_date = h1.date_input(
+                            "Data do encerramento da colheita",
+                            value=item.get("harvest_date") or date.today(),
+                        )
+                        actual_sc = h2.number_input(
+                            "Total colhido (sacas)",
+                            min_value=0.0,
+                            value=current_actual,
+                            step=10.0,
+                        )
+
+                        difference = actual_sc - estimated
+                        tolerance = estimated * 0.02
+                        if actual_sc <= 0:
+                            result = ""
+                            st.info(
+                                f"Estimativa cadastrada: {num(estimated, 0)} sacas."
+                            )
+                        elif difference < -tolerance:
+                            result = "abaixo"
+                            st.warning(
+                                f"A produção ficou {abs(difference):,.0f} sacas "
+                                "abaixo da estimativa."
+                            )
+                        elif difference > tolerance:
+                            result = "acima"
+                            st.success(
+                                f"A produção ficou {difference:,.0f} sacas "
+                                "acima da estimativa."
+                            )
+                        else:
+                            result = "dentro"
+                            st.info("A produção ficou próxima da estimativa.")
+
+                        below_reasons = [
+                            "Ano seco / falta de chuva",
+                            "Excesso de chuva",
+                            "Geada",
+                            "Granizo ou vento",
+                            "Pragas",
+                            "Doenças",
+                            "Falha de implantação",
+                            "Problema de solo ou fertilidade",
+                            "Perdas na colheita",
+                            "Área efetivamente colhida menor",
+                            "Outro",
+                        ]
+                        above_reasons = [
+                            "Clima favorável",
+                            "Boa distribuição das chuvas",
+                            "Manejo acima do esperado",
+                            "Cultivar com melhor desempenho",
+                            "Solo ou fertilidade favorável",
+                            "Baixa pressão de pragas e doenças",
+                            "Estimativa inicial conservadora",
+                            "Outro",
+                        ]
+                        neutral_reasons = [
+                            "Dentro do esperado",
+                            "Variação normal da lavoura",
+                            "Outro",
+                        ]
+                        options = (
+                            below_reasons
+                            if result == "abaixo"
+                            else above_reasons
+                            if result == "acima"
+                            else neutral_reasons
+                        )
+                        previous_reason = item.get("production_reason")
+                        default_index = (
+                            options.index(previous_reason)
+                            if previous_reason in options
+                            else 0
+                        )
+                        reason = st.selectbox(
+                            "Motivo principal",
+                            options,
+                            index=default_index,
+                            disabled=actual_sc <= 0,
+                        )
+                        notes = st.text_area(
+                            "Observação curta (opcional)",
+                            value=item.get("production_notes") or "",
+                            placeholder=(
+                                "Ex.: 20 dias sem chuva no enchimento de grãos."
+                            ),
+                        )
+                        save_harvest = st.form_submit_button(
+                            "Salvar resultado da colheita",
+                            use_container_width=True,
+                        )
+
+                    if save_harvest:
+                        if actual_sc <= 0:
+                            st.error("Informe o total efetivamente colhido.")
+                        else:
+                            ex(
+                                """UPDATE seasons
+                                   SET actual_production_sc=:p,
+                                       harvest_date=:d,
+                                       production_result=:r,
+                                       production_reason=:m,
+                                       production_notes=:o
+                                   WHERE id=:id""",
+                                {
+                                    "p": actual_sc,
+                                    "d": harvest_date,
+                                    "r": result,
+                                    "m": reason,
+                                    "o": notes.strip(),
+                                    "id": item["id"],
+                                },
+                            )
+                            log_action(
+                                user["id"],
+                                "registrou",
+                                "colheita",
+                                item["id"],
+                                (
+                                    f"{actual_sc:.0f} sc; resultado={result}; "
+                                    f"motivo={reason}"
+                                ),
+                            )
+                            st.success("Resultado da colheita registrado.")
+                            st.rerun()
+
                 new_active = st.checkbox(
                     "Safra ativa",
                     value=bool(item["active"]),

@@ -3,7 +3,10 @@ from core.database import q, scalar
 from core.utils import money, num
 
 def season_summary(season):
-    production = float(season["area_ha"]) * float(season["yield_sc_ha"])
+    estimated_production = float(season["area_ha"]) * float(season["yield_sc_ha"])
+    actual_value = season.get("actual_production_sc")
+    actual_production = float(actual_value) if actual_value not in (None, "") else None
+    production = actual_production if actual_production is not None else estimated_production
     total_cost = float(season["area_ha"]) * float(season["cost_ha"])
 
     sales = q(
@@ -18,8 +21,29 @@ def season_summary(season):
     target_revenue = total_cost * (1 + float(season["margin_pct"]) / 100)
     required_price = max(target_revenue - revenue, 0) / balance if balance else 0
 
+    variance_sc = (
+        actual_production - estimated_production
+        if actual_production is not None
+        else None
+    )
+    variance_pct = (
+        variance_sc / estimated_production * 100
+        if variance_sc is not None and estimated_production
+        else None
+    )
+    actual_yield_sc_ha = (
+        actual_production / float(season["area_ha"])
+        if actual_production is not None and float(season["area_ha"])
+        else None
+    )
+
     return {
         "production": production,
+        "estimated_production": estimated_production,
+        "actual_production": actual_production,
+        "actual_yield_sc_ha": actual_yield_sc_ha,
+        "variance_sc": variance_sc,
+        "variance_pct": variance_pct,
         "total_cost": total_cost,
         "sold": sold,
         "sold_pct": sold / production * 100 if production else 0,
