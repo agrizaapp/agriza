@@ -100,3 +100,47 @@ Cada compra agora pode ser corrigida depois do lançamento. A opção
 “Editar esta compra” permite alterar a data da compra, vencimento, descrição,
 categoria, fornecedor, valor, forma de pagamento, safra relacionada e
 observações. A data da compra fica armazenada separadamente do vencimento.
+
+
+## Manter conectado
+
+A tela de login ganhou a opção “Manter conectado neste dispositivo por 30
+dias”. Quando marcada, o AGRIZA grava no navegador um identificador aleatório e
+armazena somente o resumo criptográfico desse identificador no banco. A senha
+não é salva no navegador.
+
+O botão “Sair” revoga a sessão persistente imediatamente. Para segurança, essa
+opção deve ser usada apenas em celular ou computador pessoal, não em
+dispositivos compartilhados.
+
+
+## Contratos e compras parceladas
+
+A aba Compras permite criar um contrato com várias parcelas. Cada parcela possui
+vencimento, valor e cultura prevista para pagamento. Há um modelo preenchido
+para a plantadeira de R$ 405.000, com uma parcela de trigo e três parcelas de
+soja. A soma das parcelas é validada antes do salvamento.
+
+## Login lembrado
+
+A autorização do dispositivo passa a valer por até 1 ano. A senha não é
+armazenada no navegador; o sistema usa um token revogável. O botão Sair remove
+a autorização daquele dispositivo.
+
+## Biometria
+
+A estrutura de login persistente está pronta para receber passkeys/WebAuthn.
+A biometria não foi simulada nem substituída por armazenamento de senha, pois
+isso seria inseguro. A implementação de digital/Face ID exige um componente
+WebAuthn próprio no navegador e será uma etapa separada.
+
+
+## Verificação da versão v8
+
+Depois do deploy, o topo da tela deve mostrar:
+
+`Versão ativa: AGRIZA v8 · login lembrado + compras parceladas`
+
+Na aba Compras, o formulário `COMPRA PARCELADA / CONTRATO` aparece aberto.
+Se esses textos não aparecerem, o Render ainda está executando uma versão
+anterior ou o arquivo app.py não foi substituído na raiz do repositório.

@@ -1,17 +1,27 @@
 import io
 import json
 import zipfile
+import time
 from datetime import date, datetime, timedelta
 
 import pandas as pd
 import streamlit as st
+import extra_streamlit_components as stx
 
 from core.config import engine, IS_POSTGRES, apply_page_config, apply_global_style
 from core.database import init_db, q, scalar, ex, insert_id, log_action
 from core.security import hpw, vpw
 from core.utils import money, num
 from services.analytics import season_summary, commitment_status, agroia_recommendation
-from services.auth import setup_complete, save_setting, create_initial_admin
+from services.auth import (
+    setup_complete,
+    save_setting,
+    create_initial_admin,
+    create_persistent_session,
+    get_user_from_session_token,
+    revoke_persistent_session,
+    cleanup_expired_sessions,
+)
 from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
 
@@ -20,8 +30,19 @@ apply_page_config()
 apply_global_style()
 init_db()
 
+COOKIE_NAME = "agriza_remember_session"
+cookie_manager = stx.CookieManager(key="agriza_cookie_manager")
+
+if "session_cleanup_done" not in st.session_state:
+    try:
+        cleanup_expired_sessions()
+    except Exception:
+        pass
+    st.session_state.session_cleanup_done = True
+
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
+st.caption("Versão ativa: AGRIZA v8 · login lembrado + compras parceladas")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
@@ -54,9 +75,37 @@ if not setup_complete():
     st.stop()
 
 if "user" not in st.session_state:
+    # O componente de cookies é carregado no navegador e pode precisar de um
+    # segundo ciclo do Streamlit antes de disponibilizar os valores.
+    cookies = cookie_manager.get_all() or {}
+    remembered_token = cookies.get(COOKIE_NAME)
+
+    if remembered_token:
+        remembered_user = get_user_from_session_token(remembered_token)
+        if remembered_user:
+            st.session_state.user = remembered_user
+            st.session_state.persistent_token = remembered_token
+        else:
+            try:
+                cookie_manager.delete(COOKIE_NAME, key="delete_invalid_cookie")
+            except Exception:
+                pass
+    elif not st.session_state.get("cookie_read_attempted"):
+        st.session_state.cookie_read_attempted = True
+        time.sleep(0.8)
+        st.rerun()
+
+if "user" not in st.session_state:
+    st.caption(
+        "Você pode manter este dispositivo conectado por 1 ano."
+    )
     with st.form("login"):
         email = st.text_input("E-mail").strip().lower()
         password = st.text_input("Senha", type="password")
+        remember_login = st.checkbox(
+            "Manter conectado neste dispositivo",
+            value=True,
+        )
         submit = st.form_submit_button("Entrar", use_container_width=True)
 
     if submit:
@@ -66,8 +115,33 @@ if "user" not in st.session_state:
         )
         if rows and vpw(password, rows[0]["password_hash"]):
             st.session_state.user = {
-                key: value for key, value in rows[0].items() if key != "password_hash"
+                key: value
+                for key, value in rows[0].items()
+                if key != "password_hash"
             }
+
+            if remember_login:
+                try:
+                    token, expires_at = create_persistent_session(
+                        rows[0]["id"],
+                        days=365,
+                    )
+                    cookie_manager.set(
+                        COOKIE_NAME,
+                        token,
+                        expires_at=expires_at,
+                        key=f"set_agriza_remember_cookie_{token[:8]}",
+                    )
+                    st.session_state.persistent_token = token
+                    st.session_state.cookie_read_attempted = True
+                    time.sleep(1.2)
+                except Exception as error:
+                    st.warning(
+                        "O acesso foi realizado, mas não foi possível "
+                        "lembrar este dispositivo."
+                    )
+                    st.exception(error)
+
             st.rerun()
         else:
             st.error("E-mail ou senha incorretos.")
@@ -79,6 +153,19 @@ CAN_EDIT = user["role"] in ("admin", "operador")
 top_left, top_right = st.columns([4, 1])
 top_left.caption(f"Olá, **{user['name']}** · {user['role'].capitalize()}")
 if top_right.button("Sair", use_container_width=True):
+    active_token = (
+        st.session_state.get("persistent_token")
+        or cookie_manager.get(COOKIE_NAME)
+    )
+    try:
+        revoke_persistent_session(active_token)
+    except Exception:
+        pass
+    try:
+        cookie_manager.delete(COOKIE_NAME)
+    except Exception:
+        pass
+    st.session_state.pop("persistent_token", None)
     st.session_state.pop("user", None)
     st.rerun()
 
@@ -502,6 +589,10 @@ elif page == "🌾 Safras":
 
 elif page == "🛒 Compras":
     st.subheader("Compras e compromissos")
+    st.success(
+        "Novo: cadastre máquinas e outras compras em várias parcelas, "
+        "com vencimento e cultura de pagamento diferentes."
+    )
     seasons = q("SELECT id,name,crop FROM seasons WHERE active=TRUE ORDER BY id DESC")
     season_map = {"Nenhuma": None}
     season_map.update({f"{s['name']} · {s['crop']}": s["id"] for s in seasons})
@@ -577,6 +668,176 @@ elif page == "🛒 Compras":
             return False
 
     if CAN_EDIT:
+        with st.expander("📄 COMPRA PARCELADA / CONTRATO", expanded=True):
+            st.info(
+                "Use para máquinas, financiamentos, arrendamentos e compras com "
+                "vários vencimentos. Cada parcela pode ser vinculada a uma cultura."
+            )
+
+            use_planter_example = st.checkbox(
+                "Preencher exemplo da plantadeira",
+                value=False,
+                key="use_planter_example",
+            )
+
+            if use_planter_example:
+                default_contract_description = "Plantadeira"
+                default_contract_value = 405000.0
+                default_installments = pd.DataFrame(
+                    [
+                        {"Parcela": 1, "Vencimento": date(2026, 11, 20),
+                         "Valor (R$)": 60000.0, "Pagar com": "Trigo"},
+                        {"Parcela": 2, "Vencimento": date(2027, 5, 20),
+                         "Valor (R$)": 115000.0, "Pagar com": "Soja"},
+                        {"Parcela": 3, "Vencimento": date(2028, 5, 20),
+                         "Valor (R$)": 115000.0, "Pagar com": "Soja"},
+                        {"Parcela": 4, "Vencimento": date(2029, 5, 20),
+                         "Valor (R$)": 115000.0, "Pagar com": "Soja"},
+                    ]
+                )
+            else:
+                default_contract_description = ""
+                default_contract_value = 0.0
+                default_installments = pd.DataFrame(
+                    [
+                        {"Parcela": 1, "Vencimento": date.today(),
+                         "Valor (R$)": 0.0, "Pagar com": "Caixa"}
+                    ]
+                )
+
+            with st.form("new_installment_contract"):
+                contract_description = st.text_input(
+                    "Descrição da compra",
+                    value=default_contract_description,
+                )
+                contract_supplier = st.text_input("Fornecedor / vendedor")
+                cc1, cc2, cc3 = st.columns(3)
+                contract_category = cc1.selectbox(
+                    "Categoria",
+                    categories,
+                    index=categories.index("Máquinas"),
+                )
+                contract_purchase_date = cc2.date_input(
+                    "Data da compra",
+                    value=date.today(),
+                )
+                contract_total = cc3.number_input(
+                    "Valor total contratado (R$)",
+                    min_value=0.0,
+                    value=default_contract_value,
+                    step=1000.0,
+                )
+                contract_notes = st.text_area("Observações do contrato")
+
+                edited_installments = st.data_editor(
+                    default_installments,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Parcela": st.column_config.NumberColumn(
+                            "Parcela", min_value=1, step=1, required=True
+                        ),
+                        "Vencimento": st.column_config.DateColumn(
+                            "Vencimento", required=True, format="DD/MM/YYYY"
+                        ),
+                        "Valor (R$)": st.column_config.NumberColumn(
+                            "Valor (R$)", min_value=0.01, step=100.0,
+                            required=True, format="R$ %.2f"
+                        ),
+                        "Pagar com": st.column_config.SelectboxColumn(
+                            "Pagar com", options=payment_options, required=True
+                        ),
+                    },
+                    key="contract_installments_editor",
+                )
+
+                save_contract = st.form_submit_button(
+                    "Salvar contrato e parcelas",
+                    use_container_width=True,
+                )
+
+            if save_contract:
+                rows = edited_installments.to_dict("records")
+                rows = [
+                    row for row in rows
+                    if row.get("Vencimento") is not None
+                    and float(row.get("Valor (R$)") or 0) > 0
+                ]
+                installment_sum = sum(float(row["Valor (R$)"]) for row in rows)
+
+                if not contract_description.strip():
+                    st.error("Informe a descrição da compra.")
+                elif contract_total <= 0:
+                    st.error("Informe o valor total contratado.")
+                elif not rows:
+                    st.error("Informe pelo menos uma parcela válida.")
+                elif abs(installment_sum - contract_total) > 0.01:
+                    st.error(
+                        f"A soma das parcelas é {money(installment_sum)}, mas o "
+                        f"contrato é {money(contract_total)}."
+                    )
+                else:
+                    try:
+                        contract_id = insert_id(
+                            """INSERT INTO purchase_contracts
+                               (description,supplier,category,total_value,
+                                purchase_date,notes,status,created_by)
+                               VALUES(:d,:f,:c,:v,:pd,:n,'aberto',:u)""",
+                            {
+                                "d": contract_description.strip(),
+                                "f": contract_supplier.strip(),
+                                "c": contract_category,
+                                "v": contract_total,
+                                "pd": contract_purchase_date,
+                                "n": contract_notes.strip(),
+                                "u": user["id"],
+                            },
+                        )
+
+                        for position, row in enumerate(rows, start=1):
+                            installment_no = int(row.get("Parcela") or position)
+                            insert_id(
+                                """INSERT INTO commitments
+                                   (contract_id,installment_no,season_id,category,
+                                    description,supplier,total_value,purchase_date,
+                                    due_date,payment_crop,notes,status,created_by)
+                                   VALUES(:ct,:ino,NULL,:c,:d,:f,:v,:pd,:dt,:p,
+                                          :n,'aberto',:u)""",
+                                {
+                                    "ct": contract_id,
+                                    "ino": installment_no,
+                                    "c": contract_category,
+                                    "d": (
+                                        f"{contract_description.strip()} · "
+                                        f"Parcela {installment_no}"
+                                    ),
+                                    "f": contract_supplier.strip(),
+                                    "v": float(row["Valor (R$)"]),
+                                    "pd": contract_purchase_date,
+                                    "dt": row["Vencimento"],
+                                    "p": row["Pagar com"],
+                                    "n": contract_notes.strip(),
+                                    "u": user["id"],
+                                },
+                            )
+
+                        log_action(
+                            user["id"],
+                            "criou",
+                            "contrato_compra",
+                            contract_id,
+                            f"{contract_description.strip()} · "
+                            f"{len(rows)} parcelas · {money(contract_total)}",
+                        )
+                        st.success(
+                            f"Contrato salvo com {len(rows)} parcelas."
+                        )
+                        st.session_state.current_page = "🛒 Compras"
+                    except Exception as error:
+                        st.error("Não foi possível salvar o contrato parcelado.")
+                        st.exception(error)
+
         with st.expander("🎙️ Lançamento rápido por voz", expanded=False):
             st.info(
                 "No celular, toque no campo e use o microfone do teclado. "
@@ -731,6 +992,65 @@ elif page == "🛒 Compras":
                     selected_season,
                     notes,
                 )
+
+    contracts = q(
+        """SELECT pc.*,
+                  COALESCE(SUM(c.total_value),0) AS installment_total,
+                  COALESCE(SUM(
+                    CASE WHEN COALESCE(c.status,'aberto')='encerrado'
+                         THEN c.total_value ELSE 0 END
+                  ),0) AS closed_total
+           FROM purchase_contracts pc
+           LEFT JOIN commitments c ON c.contract_id=pc.id
+           WHERE COALESCE(pc.status,'aberto')!='cancelado'
+           GROUP BY pc.id
+           ORDER BY pc.purchase_date DESC,pc.id DESC"""
+    )
+
+    if contracts:
+        st.markdown("### Contratos parcelados")
+        for contract in contracts:
+            installments = q(
+                """SELECT * FROM commitments
+                   WHERE contract_id=:id
+                     AND COALESCE(status,'aberto')!='cancelado'
+                   ORDER BY installment_no,due_date""",
+                {"id": contract["id"]},
+            )
+            paid_total = sum(
+                float(
+                    scalar(
+                        "SELECT COALESCE(SUM(amount),0) FROM payments "
+                        "WHERE commitment_id=:id",
+                        {"id": installment["id"]},
+                    ) or 0
+                )
+                for installment in installments
+            )
+            balance = float(contract["total_value"]) - paid_total
+
+            with st.expander(
+                f"📄 {contract['description']} · "
+                f"{money(contract['total_value'])} · saldo {money(balance)}"
+            ):
+                st.write(
+                    f"**Fornecedor:** "
+                    f"{contract.get('supplier') or 'Não informado'}"
+                )
+                st.write(
+                    f"**Data da compra:** "
+                    f"{contract.get('purchase_date') or 'Não informada'}"
+                )
+                for installment in installments:
+                    installment_status = commitment_status(installment["id"])
+                    mark = "✅" if installment_status["remaining"] <= 0.01 else "◯"
+                    st.write(
+                        f"{mark} **Parcela {installment.get('installment_no') or '-'}** "
+                        f"— {installment['due_date']} — "
+                        f"{money(installment['total_value'])} — "
+                        f"pagar com **{installment.get('payment_crop') or 'Caixa'}** "
+                        f"— falta {money(installment_status['remaining'])}"
+                    )
 
     commitments = q(
         """SELECT * FROM commitments

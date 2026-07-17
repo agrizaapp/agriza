@@ -54,6 +54,14 @@ def init_db():
             setting_key VARCHAR(120) PRIMARY KEY,
             setting_value TEXT NOT NULL
         )""",
+        f"""CREATE TABLE IF NOT EXISTS auth_sessions(
+            id {id_def},
+            user_id INTEGER NOT NULL,
+            token_hash VARCHAR(64) NOT NULL UNIQUE,
+            expires_at TIMESTAMP NOT NULL,
+            revoked BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
         f"""CREATE TABLE IF NOT EXISTS seasons(
             id {id_def},
             name VARCHAR(160) NOT NULL,
@@ -71,8 +79,22 @@ def init_db():
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
+        f"""CREATE TABLE IF NOT EXISTS purchase_contracts(
+            id {id_def},
+            description VARCHAR(240) NOT NULL,
+            supplier VARCHAR(180),
+            category VARCHAR(80) NOT NULL DEFAULT 'Máquinas',
+            total_value NUMERIC(16,2) NOT NULL,
+            purchase_date DATE,
+            notes TEXT,
+            status VARCHAR(30) NOT NULL DEFAULT 'aberto',
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
         f"""CREATE TABLE IF NOT EXISTS commitments(
             id {id_def},
+            contract_id INTEGER,
+            installment_no INTEGER,
             season_id INTEGER,
             category VARCHAR(80) NOT NULL,
             description VARCHAR(240) NOT NULL,
@@ -151,6 +173,8 @@ def init_db():
     add_missing_column("commitments", "status", "VARCHAR(30) DEFAULT 'aberto'")
     add_missing_column("commitments", "created_at", timestamp_column)
     add_missing_column("commitments", "purchase_date", "DATE")
+    add_missing_column("commitments", "contract_id", "INTEGER")
+    add_missing_column("commitments", "installment_no", "INTEGER")
     add_missing_column("sales", "created_at", timestamp_column)
 
 
