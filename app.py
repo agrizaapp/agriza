@@ -95,7 +95,7 @@ if "session_cleanup_done" not in st.session_state:
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
-st.caption("Versão ativa: AGRIZA 2.1.1 Web · correção automática do banco")
+st.caption("Versão ativa: AGRIZA 2.2 Web · compras e vendas guiadas")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
@@ -763,234 +763,215 @@ elif page == "🛒 Compras":
             return False
 
     if CAN_EDIT:
-        with st.expander("📄 COMPRA PARCELADA / CONTRATO", expanded=True):
+        st.markdown("### Nova compra")
+        st.caption(
+            "Escolha o tipo de lançamento. O AGRIZA mostrará apenas os campos necessários."
+        )
+
+        purchase_type = st.radio(
+            "Como foi a compra?",
+            [
+                "🛒 À vista",
+                "📅 Com vencimento",
+                "📑 Parcelada / contrato",
+                "🚜 Máquina ou financiamento",
+            ],
+            horizontal=True,
+            key="purchase_type_v22",
+        )
+
+        if purchase_type in ("📑 Parcelada / contrato", "🚜 Máquina ou financiamento"):
             st.info(
-                "Use para máquinas, financiamentos, arrendamentos e compras "
-                "com vários vencimentos. Cada parcela pode ter uma cultura "
-                "de pagamento diferente."
+                "Compras parceladas, contratos e máquinas ficam em uma tela própria "
+                "para não misturar com compras comuns."
             )
+            if st.button(
+                "Abrir Máquinas e financiamentos",
+                use_container_width=True,
+                type="primary",
+                key="go_machine_financing_v22",
+            ):
+                st.session_state.current_page = "🚜 Máquinas e financiamentos"
+                st.rerun()
+        else:
+            is_cash = purchase_type == "🛒 À vista"
 
-            use_planter_example = st.checkbox(
-                "Preencher exemplo da plantadeira",
-                value=False,
-                key="use_planter_example_v101",
-            )
-
-            default_description = "Plantadeira" if use_planter_example else ""
-            default_total = 405000.0 if use_planter_example else 0.0
-            default_count = 4 if use_planter_example else 1
-
-            with st.form("new_installment_contract_v101", clear_on_submit=False):
-                contract_description = st.text_input(
-                    "Descrição da compra",
-                    value=default_description,
-                    placeholder="Ex.: Plantadeira 13 linhas",
+            with st.form("guided_purchase_v22", clear_on_submit=False):
+                p1, p2 = st.columns(2)
+                description = p1.text_input(
+                    "O que foi comprado?",
+                    key="purchase_description_v22",
+                    placeholder="Ex.: Fertilizante 05-20-20",
                 )
-                contract_supplier = st.text_input("Fornecedor / vendedor")
+                supplier = p2.text_input(
+                    "Fornecedor",
+                    key="purchase_supplier_v22",
+                    placeholder="Ex.: Cooperativa Alfa",
+                )
 
-                cc1, cc2, cc3 = st.columns(3)
-                contract_category = cc1.selectbox(
+                p3, p4 = st.columns(2)
+                category = p3.selectbox(
                     "Categoria",
                     categories,
-                    index=categories.index("Máquinas"),
+                    key="purchase_category_v22",
                 )
-                contract_purchase_date = cc2.date_input(
+                total_value = p4.number_input(
+                    "Valor total (R$)",
+                    min_value=0.0,
+                    step=100.0,
+                    key="purchase_value_v22",
+                )
+
+                p5, p6 = st.columns(2)
+                purchase_date = p5.date_input(
                     "Data da compra",
                     value=date.today(),
                     format="DD/MM/YYYY",
+                    key="purchase_date_v22",
                 )
-                contract_total = cc3.number_input(
-                    "Valor total contratado (R$)",
-                    min_value=0.0,
-                    value=default_total,
-                    step=1000.0,
-                )
-
-                installment_count = st.number_input(
-                    "Quantidade de parcelas",
-                    min_value=1,
-                    max_value=20,
-                    value=default_count,
-                    step=1,
-                )
-
-                contract_notes = st.text_area("Observações do contrato")
-
-                st.markdown("#### Parcelas")
-                installment_rows = []
-
-                example_dates = [
-                    date(2026, 11, 20),
-                    date(2027, 5, 20),
-                    date(2028, 5, 20),
-                    date(2029, 5, 20),
-                ]
-                example_values = [60000.0, 115000.0, 115000.0, 115000.0]
-                example_crops = ["Trigo", "Soja", "Soja", "Soja"]
-
-                for index in range(int(installment_count)):
-                    st.markdown(f"**Parcela {index + 1}**")
-                    pc1, pc2, pc3 = st.columns(3)
-
-                    if use_planter_example and index < 4:
-                        default_due = example_dates[index]
-                        default_value = example_values[index]
-                        default_crop = example_crops[index]
-                    else:
-                        default_due = date.today()
-                        default_value = 0.0
-                        default_crop = "Caixa"
-
-                    due_date_value = pc1.date_input(
-                        "Vencimento",
-                        value=default_due,
-                        format="DD/MM/YYYY",
-                        key=f"contract_due_v101_{index}",
-                    )
-                    amount_value = pc2.number_input(
-                        "Valor (R$)",
-                        min_value=0.0,
-                        value=default_value,
-                        step=1000.0,
-                        key=f"contract_amount_v101_{index}",
-                    )
-                    crop_index = (
-                        payment_options.index(default_crop)
-                        if default_crop in payment_options
-                        else 0
-                    )
-                    payment_crop_value = pc3.selectbox(
-                        "Pagar com",
-                        payment_options,
-                        index=crop_index,
-                        key=f"contract_crop_v101_{index}",
-                    )
-
-                    installment_rows.append(
-                        {
-                            "Parcela": index + 1,
-                            "Vencimento": due_date_value,
-                            "Valor (R$)": amount_value,
-                            "Pagar com": payment_crop_value,
-                        }
-                    )
-
-                save_contract = st.form_submit_button(
-                    "Salvar contrato e parcelas",
-                    use_container_width=True,
-                )
-
-            if save_contract:
-                valid_rows = [
-                    row for row in installment_rows
-                    if float(row["Valor (R$)"] or 0) > 0
-                ]
-                installment_sum = sum(
-                    float(row["Valor (R$)"]) for row in valid_rows
-                )
-
-                if not contract_description.strip():
-                    st.error("Informe a descrição da compra.")
-                elif contract_total <= 0:
-                    st.error("Informe o valor total contratado.")
-                elif not valid_rows:
-                    st.error("Informe ao menos uma parcela com valor.")
-                elif len(valid_rows) != int(installment_count):
-                    st.error("Todas as parcelas precisam ter valor maior que zero.")
-                elif abs(installment_sum - contract_total) > 0.01:
-                    st.error(
-                        f"A soma das parcelas é {money(installment_sum)}, "
-                        f"mas o contrato é {money(contract_total)}."
-                    )
+                if is_cash:
+                    due_date = purchase_date
+                    p6.info("Pagamento à vista")
                 else:
-                    try:
-                        contract_id = insert_id(
-                            """INSERT INTO purchase_contracts
-                               (description,supplier,category,total_value,
-                                purchase_date,notes,status,created_by)
-                               VALUES(:d,:f,:c,:v,:pd,:n,'aberto',:u)""",
-                            {
-                                "d": contract_description.strip(),
-                                "f": contract_supplier.strip(),
-                                "c": contract_category,
-                                "v": contract_total,
-                                "pd": contract_purchase_date,
-                                "n": contract_notes.strip(),
-                                "u": user["id"],
-                            },
-                        )
+                    due_date = p6.date_input(
+                        "Vencimento",
+                        value=date.today(),
+                        format="DD/MM/YYYY",
+                        key="purchase_due_v22",
+                    )
 
-                        for row in valid_rows:
-                            installment_no = int(row["Parcela"])
-                            insert_id(
-                                """INSERT INTO commitments
-                                   (contract_id,installment_no,season_id,category,
-                                    description,supplier,total_value,purchase_date,
-                                    due_date,payment_crop,notes,status,created_by)
-                                   VALUES(:ct,:ino,NULL,:c,:d,:f,:v,:pd,:dt,:p,
-                                          :n,'aberto',:u)""",
-                                {
-                                    "ct": contract_id,
-                                    "ino": installment_no,
-                                    "c": contract_category,
-                                    "d": (
-                                        f"{contract_description.strip()} · "
-                                        f"Parcela {installment_no}"
-                                    ),
-                                    "f": contract_supplier.strip(),
-                                    "v": float(row["Valor (R$)"]),
-                                    "pd": contract_purchase_date,
-                                    "dt": row["Vencimento"],
-                                    "p": row["Pagar com"],
-                                    "n": contract_notes.strip(),
-                                    "u": user["id"],
-                                },
-                            )
+                p7, p8 = st.columns(2)
+                payment_crop = p7.selectbox(
+                    "Fonte prevista de pagamento",
+                    ["Caixa"] if is_cash else payment_options,
+                    key="purchase_crop_v22",
+                )
+                selected_season = p8.selectbox(
+                    "Safra relacionada",
+                    list(season_map),
+                    key="purchase_season_v22",
+                )
 
-                        log_action(
-                            user["id"],
-                            "criou",
-                            "contrato_compra",
-                            contract_id,
-                            f"{contract_description.strip()} · "
-                            f"{len(valid_rows)} parcelas · {money(contract_total)}",
-                        )
-                        st.success(
-                            f"Contrato salvo com {len(valid_rows)} parcelas."
-                        )
-                        st.session_state.current_page = "🛒 Compras"
-                    except Exception as error:
-                        st.error("Não foi possível salvar o contrato parcelado.")
-                        st.exception(error)
+                notes = st.text_area(
+                    "Observação (opcional)",
+                    key="purchase_notes_v22",
+                )
 
-        with st.expander("🎙️ Lançamento rápido por voz", expanded=False):
-            st.info(
-                "Toque no campo e use o microfone do teclado do celular. "
-                "Fale em uma frase com produto, fornecedor, valor, vencimento "
-                "e cultura de pagamento."
-            )
-            st.code(
-                "Comprei uma plantadeira do fornecedor Agro Máquinas por "
-                "405 mil reais, vencimento dia 20 de novembro de 2026, "
-                "pagar com trigo",
-                language=None,
-            )
-            st.caption(
-                "Também entende valores como “trinta e cinco mil reais”, "
-                "datas faladas e números com ponto ou vírgula."
-            )
+                review_purchase = st.form_submit_button(
+                    "Revisar compra",
+                    use_container_width=True,
+                    type="primary",
+                )
 
-            with st.form("voice_purchase_interpret"):
-                spoken_purchase = st.text_area(
-                    "Dite ou escreva a compra",
-                    placeholder=(
-                        "Comprei 20 toneladas de fertilizante da Cooperativa Alfa "
-                        "por 35 mil reais, vence em 30 dias, para a safra de milho"
+            if review_purchase:
+                if not description.strip():
+                    st.error("Informe o que foi comprado.")
+                elif total_value <= 0:
+                    st.error("Informe um valor maior que zero.")
+                elif due_date < purchase_date:
+                    st.error("O vencimento não pode ser anterior à data da compra.")
+                else:
+                    st.session_state.purchase_review_v22 = {
+                        "description": description.strip(),
+                        "supplier": supplier.strip(),
+                        "category": category,
+                        "total_value": float(total_value),
+                        "purchase_date": purchase_date,
+                        "due_date": due_date,
+                        "payment_crop": payment_crop,
+                        "selected_season": selected_season,
+                        "notes": notes.strip(),
+                        "purchase_type": purchase_type,
+                    }
+
+            purchase_review = st.session_state.get("purchase_review_v22")
+            if purchase_review:
+                d = purchase_review
+                st.markdown("---")
+                confirmation_card(
+                    "✅ Confirmar compra",
+                    [
+                        ("Tipo", d["purchase_type"]),
+                        ("Produto/serviço", d["description"]),
+                        ("Fornecedor", d["supplier"] or "Não informado"),
+                        ("Categoria", d["category"]),
+                        ("Data da compra", d["purchase_date"].strftime("%d/%m/%Y")),
+                        ("Vencimento", d["due_date"].strftime("%d/%m/%Y")),
+                        ("Pagamento previsto", d["payment_crop"]),
+                        ("Safra relacionada", d["selected_season"]),
+                    ],
+                    "Valor total",
+                    money(d["total_value"]),
+                    warnings=(
+                        ["Fornecedor não informado. Confirme se deseja continuar."]
+                        if not d["supplier"] else None
                     ),
-                    height=120,
+                )
+
+                b1, b2, b3 = st.columns(3)
+                confirm_purchase = b1.button(
+                    "✅ Confirmar e salvar",
+                    use_container_width=True,
+                    type="primary",
+                    key="confirm_purchase_v22",
+                )
+                correct_purchase = b2.button(
+                    "✏️ Corrigir",
+                    use_container_width=True,
+                    key="correct_purchase_v22",
+                )
+                discard_purchase = b3.button(
+                    "🗑️ Descartar",
+                    use_container_width=True,
+                    key="discard_purchase_v22",
+                )
+
+                if correct_purchase:
+                    st.session_state.pop("purchase_review_v22", None)
+                    st.info("Corrija os campos acima e clique novamente em Revisar compra.")
+                    st.rerun()
+
+                if discard_purchase:
+                    st.session_state.pop("purchase_review_v22", None)
+                    for key in [
+                        "purchase_description_v22", "purchase_supplier_v22",
+                        "purchase_value_v22", "purchase_notes_v22",
+                    ]:
+                        st.session_state.pop(key, None)
+                    st.info("Lançamento descartado. Nada foi salvo.")
+                    st.rerun()
+
+                if confirm_purchase:
+                    if save_purchase_record(
+                        d["description"],
+                        d["category"],
+                        d["supplier"],
+                        d["total_value"],
+                        d["purchase_date"],
+                        d["due_date"],
+                        d["payment_crop"],
+                        d["selected_season"],
+                        d["notes"],
+                    ):
+                        st.session_state.pop("purchase_review_v22", None)
+                        st.success("Compra confirmada e salva.")
+                        st.rerun()
+
+        with st.expander("🎙️ Compra por voz", expanded=False):
+            st.caption(
+                "Dite a compra. O AGRIZA interpreta e mostra o resumo antes de salvar."
+            )
+            with st.form("voice_purchase_interpret_v22"):
+                spoken_purchase = st.text_area(
+                    "Dite ou escreva",
+                    placeholder=(
+                        "Comprei fertilizante da Cooperativa Alfa por 35 mil reais, "
+                        "vence em 30 dias, pagar com soja"
+                    ),
+                    height=100,
                 )
                 interpret_purchase = st.form_submit_button(
-                    "Interpretar compra",
+                    "Interpretar",
                     use_container_width=True,
                 )
 
@@ -998,143 +979,94 @@ elif page == "🛒 Compras":
                 if not spoken_purchase.strip():
                     st.error("Dite ou escreva os dados da compra.")
                 else:
-                    st.session_state.voice_purchase_draft = parse_spoken_purchase(
-                        spoken_purchase,
-                        seasons,
+                    st.session_state.voice_purchase_draft_v22 = parse_spoken_purchase(
+                        spoken_purchase, seasons
                     )
 
-            draft = st.session_state.get("voice_purchase_draft")
-            if draft:
-                if draft.get("missing"):
-                    st.warning(
-                        "Não consegui identificar automaticamente: "
-                        + ", ".join(draft["missing"])
-                        + ". Preencha esses campos abaixo."
-                    )
-                else:
-                    st.success("Dados principais identificados. Confira antes de salvar.")
-
+            voice_draft = st.session_state.get("voice_purchase_draft_v22")
+            if voice_draft:
                 season_labels = list(season_map)
-                season_index = (
-                    season_labels.index(draft["season_label"])
-                    if draft["season_label"] in season_labels
-                    else 0
-                )
-                category_index = (
-                    categories.index(draft["category"])
-                    if draft["category"] in categories
-                    else len(categories) - 1
-                )
-                payment_index = (
-                    payment_options.index(draft["payment_crop"])
-                    if draft["payment_crop"] in payment_options
-                    else payment_options.index("Caixa")
-                )
-
-                with st.form("voice_purchase_confirm"):
-                    voice_description = st.text_input(
+                with st.form("voice_purchase_review_form_v22", clear_on_submit=False):
+                    vd1, vd2 = st.columns(2)
+                    v_description = vd1.text_input(
                         "O que foi comprado?",
-                        value=draft["description"],
+                        value=voice_draft.get("description", ""),
                     )
-                    voice_category = st.selectbox(
-                        "Categoria",
-                        categories,
-                        index=category_index,
-                    )
-                    voice_supplier = st.text_input(
+                    v_supplier = vd2.text_input(
                         "Fornecedor",
-                        value=draft["supplier"],
+                        value=voice_draft.get("supplier", ""),
                     )
-                    vp1, vp2, vp3 = st.columns(3)
-                    voice_total = vp1.number_input(
+                    vd3, vd4 = st.columns(2)
+                    v_total = vd3.number_input(
                         "Valor total (R$)",
                         min_value=0.0,
-                        value=float(draft["total_value"]),
-                        step=100.0,
+                        value=float(voice_draft.get("total_value", 0.0)),
                     )
-                    voice_purchase_date = vp2.date_input(
+                    v_category = vd4.selectbox(
+                        "Categoria",
+                        categories,
+                        index=(
+                            categories.index(voice_draft.get("category"))
+                            if voice_draft.get("category") in categories else len(categories) - 1
+                        ),
+                    )
+                    vd5, vd6 = st.columns(2)
+                    v_purchase_date = vd5.date_input(
                         "Data da compra",
                         value=date.today(),
+                        format="DD/MM/YYYY",
                     )
-                    voice_due_date = vp3.date_input(
+                    v_due = vd6.date_input(
                         "Vencimento",
-                        value=draft["due_date"],
+                        value=voice_draft.get("due_date", date.today()),
+                        format="DD/MM/YYYY",
                     )
-                    voice_payment_crop = st.selectbox(
-                        "Pretende pagar com",
+                    v_crop = st.selectbox(
+                        "Fonte prevista de pagamento",
                         payment_options,
-                        index=payment_index,
+                        index=(
+                            payment_options.index(voice_draft.get("payment_crop"))
+                            if voice_draft.get("payment_crop") in payment_options else 0
+                        ),
                     )
-                    voice_season = st.selectbox(
+                    v_season = st.selectbox(
                         "Safra relacionada",
                         season_labels,
-                        index=season_index,
+                        index=(
+                            season_labels.index(voice_draft.get("season_label"))
+                            if voice_draft.get("season_label") in season_labels else 0
+                        ),
                     )
-                    voice_notes = st.text_area(
+                    v_notes = st.text_area(
                         "Observação",
-                        value=draft["notes"],
+                        value=voice_draft.get("notes", ""),
                     )
-                    save_voice_purchase = st.form_submit_button(
-                        "Salvar compra ditada",
+                    review_voice_purchase = st.form_submit_button(
+                        "Revisar compra por voz",
                         use_container_width=True,
                     )
 
-                if save_voice_purchase:
-                    if save_purchase_record(
-                        voice_description,
-                        voice_category,
-                        voice_supplier,
-                        voice_total,
-                        voice_purchase_date,
-                        voice_due_date,
-                        voice_payment_crop,
-                        voice_season,
-                        voice_notes,
-                    ):
-                        st.session_state.pop("voice_purchase_draft", None)
+                if review_voice_purchase:
+                    if not v_description.strip() or v_total <= 0:
+                        st.error("Confira a descrição e o valor.")
+                    else:
+                        st.session_state.purchase_review_v22 = {
+                            "description": v_description.strip(),
+                            "supplier": v_supplier.strip(),
+                            "category": v_category,
+                            "total_value": float(v_total),
+                            "purchase_date": v_purchase_date,
+                            "due_date": v_due,
+                            "payment_crop": v_crop,
+                            "selected_season": v_season,
+                            "notes": v_notes.strip(),
+                            "purchase_type": "🎙️ Compra por voz",
+                        }
+                        st.session_state.pop("voice_purchase_draft_v22", None)
+                        st.rerun()
 
-        with st.expander("⌨️ Lançamento manual", expanded=True):
-            with st.form("new_commitment", clear_on_submit=True):
-                description = st.text_input("O que foi comprado?")
-                category = st.selectbox("Categoria", categories)
-                supplier = st.text_input("Fornecedor")
-                c1, c2, c3 = st.columns(3)
-                total_value = c1.number_input(
-                    "Valor total (R$)",
-                    min_value=0.0,
-                )
-                purchase_date = c2.date_input(
-                    "Data da compra",
-                    value=date.today(),
-                )
-                due_date = c3.date_input("Vencimento")
-                payment_crop = st.selectbox(
-                    "Pretende pagar com",
-                    payment_options,
-                )
-                selected_season = st.selectbox(
-                    "Safra relacionada",
-                    list(season_map),
-                )
-                notes = st.text_area("Observação")
-                submit = st.form_submit_button(
-                    "Salvar compra",
-                    use_container_width=True,
-                )
-
-            if submit:
-                save_purchase_record(
-                    description,
-                    category,
-                    supplier,
-                    total_value,
-                    purchase_date,
-                    due_date,
-                    payment_crop,
-                    selected_season,
-                    notes,
-                )
-
+        st.markdown("---")
+        st.markdown("### Compras já registradas")
     contracts = q(
         """SELECT pc.*,
                   COALESCE(SUM(c.total_value),0) AS installment_total,
@@ -1150,7 +1082,9 @@ elif page == "🛒 Compras":
     )
 
     if contracts:
-        st.markdown("### Contratos parcelados")
+        st.markdown("---")
+        st.markdown("### 📑 Contratos e parcelas")
+        st.caption("Área separada das compras comuns.")
         for contract in contracts:
             installments = q(
                 """SELECT * FROM commitments
@@ -1787,173 +1721,286 @@ elif page == "💰 Vendas":
                 return False
 
         if CAN_EDIT:
-            with st.expander("🎙️ Lançamento rápido por voz", expanded=False):
-                st.info(
-                    "Toque no campo e use o microfone do teclado do celular. "
-                    "Fale quantidade, cultura, preço, comprador e data."
+            st.markdown("### Nova venda")
+            st.caption(
+                "Preencha os dados, revise o resumo e só depois confirme o salvamento."
+            )
+
+            sale_mode = st.radio(
+                "Forma de lançamento",
+                ["⌨️ Digitar venda", "🎙️ Venda por voz"],
+                horizontal=True,
+                key="sale_mode_v22",
+            )
+
+            if sale_mode == "⌨️ Digitar venda":
+                labels = list(season_map)
+                selected_label = st.selectbox(
+                    "Safra",
+                    labels,
+                    key="sale_season_v22",
                 )
-                st.code(
-                    "Vendi quinhentas sacas de milho a 72 reais por saca "
-                    "para Cooperativa Alfa hoje",
-                    language=None,
-                )
-                st.caption(
-                    "Também aceita “500 sacas”, datas como 20/11/2026 "
-                    "ou “20 de novembro de 2026”."
-                )
-                with st.form("voice_sale_interpret"):
-                    spoken_text = st.text_area(
-                        "Dite ou escreva a venda",
-                        placeholder=(
-                            "Vendi 500 sacas de milho a 72 reais "
-                            "para Cooperativa Alfa hoje"
-                        ),
-                        height=110,
-                    )
-                    interpret = st.form_submit_button(
-                        "Interpretar lançamento",
-                        use_container_width=True,
-                    )
-
-                if interpret:
-                    if not spoken_text.strip():
-                        st.error("Dite ou escreva os dados da venda.")
-                    else:
-                        st.session_state.voice_sale_draft = parse_spoken_sale(
-                            spoken_text,
-                            seasons,
-                        )
-
-                draft = st.session_state.get("voice_sale_draft")
-                if draft:
-                    if draft.get("missing"):
-                        st.warning(
-                            "Não consegui identificar automaticamente: "
-                            + ", ".join(draft["missing"])
-                            + ". Preencha esses campos abaixo."
-                        )
-                    else:
-                        st.success("Dados principais identificados. Confira antes de salvar.")
-                    labels = list(season_map)
-                    default_season = (
-                        labels.index(draft["season_label"])
-                        if draft["season_label"] in labels
-                        else 0
-                    )
-                    with st.form("voice_sale_confirm"):
-                        voice_season = st.selectbox(
-                            "Safra",
-                            labels,
-                            index=default_season,
-                            key="voice_season",
-                        )
-                        vc1, vc2 = st.columns(2)
-                        voice_quantity = vc1.number_input(
-                            "Quantidade (sc)",
-                            min_value=0.0,
-                            value=float(draft["quantity"]),
-                            step=10.0,
-                            key="voice_quantity",
-                        )
-                        voice_price = vc2.number_input(
-                            "Preço (R$/sc)",
-                            min_value=0.0,
-                            value=float(draft["price"]),
-                            step=0.50,
-                            key="voice_price",
-                        )
-                        voice_buyer = st.text_input(
-                            "Comprador/cooperativa",
-                            value=draft["buyer"],
-                            key="voice_buyer",
-                        )
-                        voice_objective = st.selectbox(
-                            "Esta venda protege",
-                            list(commitment_map),
-                            key="voice_objective",
-                        )
-                        voice_date = st.date_input(
-                            "Data da venda",
-                            value=draft["sale_date"],
-                            key="voice_date",
-                        )
-                        voice_notes = st.text_area(
-                            "Observação",
-                            value=draft["notes"],
-                            key="voice_notes",
-                        )
-                        voice_save = st.form_submit_button(
-                            "Salvar venda ditada",
-                            use_container_width=True,
-                        )
-
-                    if voice_save:
-                        if save_sale_record(
-                            voice_season,
-                            voice_quantity,
-                            voice_price,
-                            voice_buyer,
-                            voice_objective,
-                            voice_date,
-                            voice_notes,
-                        ):
-                            st.session_state.pop("voice_sale_draft", None)
-
-            with st.expander("⌨️ Lançamento manual", expanded=True):
-                first_label = list(season_map)[0]
-                first_id = season_map[first_label]
-                first_crop = q(
-                    "SELECT crop FROM seasons WHERE id=:id",
-                    {"id": first_id},
-                )[0]["crop"]
-                quote_reference = latest_quote_for_crop(first_crop)
+                selected_id = season_map[selected_label]
+                selected_row = q(
+                    "SELECT * FROM seasons WHERE id=:id",
+                    {"id": selected_id},
+                )[0]
+                selected_summary = season_summary(selected_row)
+                quote_reference = latest_quote_for_crop(selected_row["crop"])
                 suggested_price = (
                     float(quote_reference["price_sc"])
                     if quote_reference else 0.0
                 )
-                if quote_reference:
-                    st.info(
-                        f"Referência regional para {first_crop}: "
-                        f"{money(suggested_price)}/sc · "
-                        f"{quote_reference.get('source') or 'fonte não informada'}. "
-                        f"Você pode alterar o valor."
-                    )
 
-                with st.form("new_sale", clear_on_submit=True):
-                    season_label = st.selectbox("Safra", list(season_map))
-                    c1, c2 = st.columns(2)
-                    quantity = c1.number_input("Quantidade (sc)", min_value=0.0)
-                    price = c2.number_input(
-                        "Preço (R$/sc)",
+                st.info(
+                    f"Saldo livre: {num(selected_summary['balance'], 0)} sc"
+                    + (
+                        f" · Referência regional: {money(suggested_price)}/sc "
+                        f"({quote_reference.get('source') or 'fonte não informada'})"
+                        if quote_reference else ""
+                    )
+                )
+
+                with st.form("guided_sale_v22", clear_on_submit=False):
+                    s1, s2 = st.columns(2)
+                    quantity = s1.number_input(
+                        "Quantidade (sc)",
+                        min_value=0.0,
+                        step=10.0,
+                        key="sale_quantity_v22",
+                    )
+                    price = s2.number_input(
+                        "Preço por saca (R$)",
                         min_value=0.0,
                         value=suggested_price,
+                        step=0.50,
+                        key="sale_price_v22",
                     )
-                    buyer = st.text_input("Comprador/cooperativa")
-                    objective = st.selectbox("Esta venda protege", list(commitment_map))
-                    sale_date = st.date_input("Data da venda", value=date.today())
-                    notes = st.text_area("Observação")
-                    submit = st.form_submit_button(
-                        "Salvar venda",
+                    buyer = st.text_input(
+                        "Comprador/cooperativa",
+                        key="sale_buyer_v22",
+                    )
+                    objective = st.selectbox(
+                        "Esta venda será vinculada a",
+                        list(commitment_map),
+                        key="sale_objective_v22",
+                    )
+                    sale_date = st.date_input(
+                        "Data da venda",
+                        value=date.today(),
+                        format="DD/MM/YYYY",
+                        key="sale_date_v22",
+                    )
+                    notes = st.text_area(
+                        "Observação (opcional)",
+                        key="sale_notes_v22",
+                    )
+                    review_sale = st.form_submit_button(
+                        "Revisar venda",
+                        use_container_width=True,
+                        type="primary",
+                    )
+
+                if review_sale:
+                    if quantity <= 0:
+                        st.error("Informe a quantidade.")
+                    elif price <= 0:
+                        st.error("Informe o preço por saca.")
+                    elif quantity > selected_summary["balance"]:
+                        st.error(
+                            f"A quantidade supera o saldo livre de "
+                            f"{num(selected_summary['balance'], 0)} sc."
+                        )
+                    else:
+                        st.session_state.sale_review_v22 = {
+                            "season_label": selected_label,
+                            "quantity": float(quantity),
+                            "price": float(price),
+                            "buyer": buyer.strip(),
+                            "objective": objective,
+                            "sale_date": sale_date,
+                            "notes": notes.strip(),
+                            "balance_before": float(selected_summary["balance"]),
+                            "crop": selected_row["crop"],
+                        }
+
+            else:
+                with st.form("voice_sale_interpret_v22"):
+                    spoken_sale = st.text_area(
+                        "Dite ou escreva a venda",
+                        placeholder=(
+                            "Vendi 500 sacas de soja a 122 reais "
+                            "para Cooperativa Alfa hoje"
+                        ),
+                        height=100,
+                    )
+                    interpret_sale = st.form_submit_button(
+                        "Interpretar",
                         use_container_width=True,
                     )
 
-                if submit:
-                    save_sale_record(
-                        season_label,
-                        quantity,
-                        price,
-                        buyer,
-                        objective,
-                        sale_date,
-                        notes,
-                    )
+                if interpret_sale:
+                    if not spoken_sale.strip():
+                        st.error("Dite ou escreva os dados da venda.")
+                    else:
+                        st.session_state.voice_sale_draft_v22 = parse_spoken_sale(
+                            spoken_sale, seasons
+                        )
 
+                voice_sale_draft = st.session_state.get("voice_sale_draft_v22")
+                if voice_sale_draft:
+                    labels = list(season_map)
+                    default_label = (
+                        voice_sale_draft.get("season_label")
+                        if voice_sale_draft.get("season_label") in labels
+                        else labels[0]
+                    )
+                    with st.form("voice_sale_review_form_v22", clear_on_submit=False):
+                        v_season = st.selectbox(
+                            "Safra",
+                            labels,
+                            index=labels.index(default_label),
+                        )
+                        vs1, vs2 = st.columns(2)
+                        v_quantity = vs1.number_input(
+                            "Quantidade (sc)",
+                            min_value=0.0,
+                            value=float(voice_sale_draft.get("quantity", 0.0)),
+                        )
+                        v_price = vs2.number_input(
+                            "Preço por saca (R$)",
+                            min_value=0.0,
+                            value=float(voice_sale_draft.get("price", 0.0)),
+                        )
+                        v_buyer = st.text_input(
+                            "Comprador/cooperativa",
+                            value=voice_sale_draft.get("buyer", ""),
+                        )
+                        v_objective = st.selectbox(
+                            "Esta venda será vinculada a",
+                            list(commitment_map),
+                        )
+                        v_date = st.date_input(
+                            "Data da venda",
+                            value=voice_sale_draft.get("sale_date", date.today()),
+                            format="DD/MM/YYYY",
+                        )
+                        v_notes = st.text_area(
+                            "Observação",
+                            value=voice_sale_draft.get("notes", ""),
+                        )
+                        review_voice_sale = st.form_submit_button(
+                            "Revisar venda por voz",
+                            use_container_width=True,
+                        )
+
+                    if review_voice_sale:
+                        season_id = season_map[v_season]
+                        season_row = q(
+                            "SELECT * FROM seasons WHERE id=:id",
+                            {"id": season_id},
+                        )[0]
+                        current_summary = season_summary(season_row)
+                        if v_quantity <= 0 or v_price <= 0:
+                            st.error("Confira quantidade e preço.")
+                        elif v_quantity > current_summary["balance"]:
+                            st.error("A venda supera o saldo livre da safra.")
+                        else:
+                            st.session_state.sale_review_v22 = {
+                                "season_label": v_season,
+                                "quantity": float(v_quantity),
+                                "price": float(v_price),
+                                "buyer": v_buyer.strip(),
+                                "objective": v_objective,
+                                "sale_date": v_date,
+                                "notes": v_notes.strip(),
+                                "balance_before": float(current_summary["balance"]),
+                                "crop": season_row["crop"],
+                            }
+                            st.session_state.pop("voice_sale_draft_v22", None)
+                            st.rerun()
+
+            sale_review = st.session_state.get("sale_review_v22")
+            if sale_review:
+                d = sale_review
+                sale_total = d["quantity"] * d["price"]
+                balance_after = d["balance_before"] - d["quantity"]
+
+                st.markdown("---")
+                confirmation_card(
+                    "✅ Confirmar venda",
+                    [
+                        ("Safra", d["season_label"]),
+                        ("Produto", d["crop"]),
+                        ("Quantidade", f"{num(d['quantity'], 0)} sc"),
+                        ("Preço por saca", money(d["price"])),
+                        ("Comprador", d["buyer"] or "Não informado"),
+                        ("Data", d["sale_date"].strftime("%d/%m/%Y")),
+                        ("Vinculação", d["objective"]),
+                        ("Saldo após a venda", f"{num(balance_after, 0)} sc"),
+                    ],
+                    "Valor total",
+                    money(sale_total),
+                    warnings=(
+                        ["Comprador não informado. Confirme se deseja continuar."]
+                        if not d["buyer"] else None
+                    ),
+                )
+
+                sb1, sb2, sb3 = st.columns(3)
+                confirm_sale = sb1.button(
+                    "✅ Confirmar e salvar",
+                    use_container_width=True,
+                    type="primary",
+                    key="confirm_sale_v22",
+                )
+                correct_sale = sb2.button(
+                    "✏️ Corrigir",
+                    use_container_width=True,
+                    key="correct_sale_v22",
+                )
+                discard_sale = sb3.button(
+                    "🗑️ Descartar",
+                    use_container_width=True,
+                    key="discard_sale_v22",
+                )
+
+                if correct_sale:
+                    st.session_state.pop("sale_review_v22", None)
+                    st.info("Corrija os campos acima e clique novamente em Revisar venda.")
+                    st.rerun()
+
+                if discard_sale:
+                    st.session_state.pop("sale_review_v22", None)
+                    for key in [
+                        "sale_quantity_v22", "sale_price_v22",
+                        "sale_buyer_v22", "sale_notes_v22",
+                    ]:
+                        st.session_state.pop(key, None)
+                    st.info("Venda descartada. Nada foi salvo.")
+                    st.rerun()
+
+                if confirm_sale:
+                    if save_sale_record(
+                        d["season_label"],
+                        d["quantity"],
+                        d["price"],
+                        d["buyer"],
+                        d["objective"],
+                        d["sale_date"],
+                        d["notes"],
+                    ):
+                        st.session_state.pop("sale_review_v22", None)
+                        st.success("Venda confirmada e salva.")
+                        st.rerun()
+
+            st.markdown("---")
     sales = q(
         """SELECT sales.*,seasons.name AS season_name,seasons.crop
            FROM sales JOIN seasons ON seasons.id=sales.season_id
            ORDER BY sale_date DESC,sales.id DESC"""
     )
-    st.markdown("### Histórico")
+    st.markdown("### Vendas já registradas")
     if not sales:
         st.caption("Nenhuma venda registrada.")
     for item in sales:
