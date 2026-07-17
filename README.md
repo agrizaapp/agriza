@@ -30,3 +30,10 @@ Isso evita que o nome AGRIZA e o ícone sejam cortados em computador e celular.
 O menu principal agora usa botões grandes, organizados em duas colunas no
 computador e empilhados no celular. A área de toque foi ampliada para facilitar
 o uso por pessoas com mãos grandes, inclusive nos botões de formulários.
+
+## Revisão completa de dependências internas
+
+Foram conferidos todos os nomes utilizados no `app.py`. A revisão incluiu os
+imports de datas, pandas, arquivos ZIP, JSON, buffer em memória, conexão com o
+banco e geração/verificação de senhas. Isso elimina os erros sequenciais de
+`NameError` que apareciam nas páginas de mercado, usuários e backup.
