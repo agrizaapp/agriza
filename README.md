@@ -73,3 +73,30 @@ para mostrar a falha real sem encerrar a sessão.
 - O AGRIZA interpreta quantidade, preço, cultura/safra, comprador e data.
 - Antes de salvar, todos os campos aparecem para conferência e correção.
 - O lançamento manual continua disponível.
+
+
+## Compras por voz
+
+A aba Compras ganhou um lançamento rápido por voz. No celular, o usuário pode
+usar o microfone do próprio teclado e ditar uma frase curta. O AGRIZA tenta
+identificar:
+
+- produto ou serviço comprado;
+- categoria;
+- fornecedor;
+- valor total;
+- vencimento;
+- cultura usada para pagamento;
+- safra relacionada.
+
+Todos os dados aparecem para conferência antes da gravação. O formulário manual
+permanece disponível. A correção que mantém a sessão aberta ao salvar compras e
+pagamentos também foi mantida nesta versão.
+
+
+## Edição de compras
+
+Cada compra agora pode ser corrigida depois do lançamento. A opção
+“Editar esta compra” permite alterar a data da compra, vencimento, descrição,
+categoria, fornecedor, valor, forma de pagamento, safra relacionada e
+observações. A data da compra fica armazenada separadamente do vencimento.

@@ -78,6 +78,7 @@ def init_db():
             description VARCHAR(240) NOT NULL,
             supplier VARCHAR(180),
             total_value NUMERIC(16,2) NOT NULL,
+            purchase_date DATE,
             due_date DATE NOT NULL,
             payment_crop VARCHAR(80),
             notes TEXT,
@@ -149,6 +150,7 @@ def init_db():
     add_missing_column("seasons", "production_notes", "TEXT")
     add_missing_column("commitments", "status", "VARCHAR(30) DEFAULT 'aberto'")
     add_missing_column("commitments", "created_at", timestamp_column)
+    add_missing_column("commitments", "purchase_date", "DATE")
     add_missing_column("sales", "created_at", timestamp_column)
 
 

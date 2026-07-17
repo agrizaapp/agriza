@@ -13,6 +13,7 @@ from core.utils import money, num
 from services.analytics import season_summary, commitment_status, agroia_recommendation
 from services.auth import setup_complete, save_setting, create_initial_admin
 from services.voice_sales import parse_spoken_sale
+from services.voice_purchases import parse_spoken_purchase
 
 
 apply_page_config()
@@ -505,68 +506,231 @@ elif page == "🛒 Compras":
     season_map = {"Nenhuma": None}
     season_map.update({f"{s['name']} · {s['crop']}": s["id"] for s in seasons})
 
+    categories = [
+        "Sementes",
+        "Fertilizantes",
+        "Defensivos",
+        "Máquinas",
+        "Custeio",
+        "Arrendamento",
+        "Outro",
+    ]
+    payment_options = [
+        "Soja",
+        "Milho",
+        "Trigo",
+        "Canola",
+        "Caixa",
+        "Mais de uma",
+    ]
+
+    def save_purchase_record(
+        description,
+        category,
+        supplier,
+        total_value,
+        purchase_date,
+        due_date,
+        payment_crop,
+        selected_season,
+        notes,
+    ):
+        if not description.strip() or total_value <= 0:
+            st.error("Informe a descrição e o valor.")
+            return False
+
+        try:
+            commitment_id = insert_id(
+                """INSERT INTO commitments
+                   (season_id,category,description,supplier,total_value,
+                    purchase_date,due_date,payment_crop,notes,status,created_by)
+                   VALUES(:s,:c,:d,:f,:v,:pd,:dt,:p,:n,'aberto',:u)""",
+                {
+                    "s": season_map[selected_season],
+                    "c": category,
+                    "d": description.strip(),
+                    "f": supplier.strip(),
+                    "v": total_value,
+                    "pd": purchase_date,
+                    "dt": due_date,
+                    "p": payment_crop,
+                    "n": notes.strip(),
+                    "u": user["id"],
+                },
+            )
+            log_action(
+                user["id"],
+                "criou",
+                "compromisso",
+                commitment_id,
+                description.strip(),
+            )
+            st.session_state.current_page = "🛒 Compras"
+            st.success("Compra salva com sucesso.")
+            return True
+        except Exception as error:
+            st.error(
+                "Não foi possível salvar a compra. "
+                "A sessão continuará aberta para você conferir os dados."
+            )
+            st.exception(error)
+            return False
+
     if CAN_EDIT:
-        with st.expander("➕ Registrar compra"):
+        with st.expander("🎙️ Lançamento rápido por voz", expanded=False):
+            st.info(
+                "No celular, toque no campo e use o microfone do teclado. "
+                "Exemplo: “Comprei fertilizante da Cooperativa Alfa por "
+                "35 mil reais, vence em 30 dias, para a safra de milho”."
+            )
+
+            with st.form("voice_purchase_interpret"):
+                spoken_purchase = st.text_area(
+                    "Dite ou escreva a compra",
+                    placeholder=(
+                        "Comprei 20 toneladas de fertilizante da Cooperativa Alfa "
+                        "por 35 mil reais, vence em 30 dias, para a safra de milho"
+                    ),
+                    height=120,
+                )
+                interpret_purchase = st.form_submit_button(
+                    "Interpretar compra",
+                    use_container_width=True,
+                )
+
+            if interpret_purchase:
+                if not spoken_purchase.strip():
+                    st.error("Dite ou escreva os dados da compra.")
+                else:
+                    st.session_state.voice_purchase_draft = parse_spoken_purchase(
+                        spoken_purchase,
+                        seasons,
+                    )
+
+            draft = st.session_state.get("voice_purchase_draft")
+            if draft:
+                st.caption("Confira ou corrija os dados antes de salvar.")
+
+                season_labels = list(season_map)
+                season_index = (
+                    season_labels.index(draft["season_label"])
+                    if draft["season_label"] in season_labels
+                    else 0
+                )
+                category_index = (
+                    categories.index(draft["category"])
+                    if draft["category"] in categories
+                    else len(categories) - 1
+                )
+                payment_index = (
+                    payment_options.index(draft["payment_crop"])
+                    if draft["payment_crop"] in payment_options
+                    else payment_options.index("Caixa")
+                )
+
+                with st.form("voice_purchase_confirm"):
+                    voice_description = st.text_input(
+                        "O que foi comprado?",
+                        value=draft["description"],
+                    )
+                    voice_category = st.selectbox(
+                        "Categoria",
+                        categories,
+                        index=category_index,
+                    )
+                    voice_supplier = st.text_input(
+                        "Fornecedor",
+                        value=draft["supplier"],
+                    )
+                    vp1, vp2, vp3 = st.columns(3)
+                    voice_total = vp1.number_input(
+                        "Valor total (R$)",
+                        min_value=0.0,
+                        value=float(draft["total_value"]),
+                        step=100.0,
+                    )
+                    voice_purchase_date = vp2.date_input(
+                        "Data da compra",
+                        value=date.today(),
+                    )
+                    voice_due_date = vp3.date_input(
+                        "Vencimento",
+                        value=draft["due_date"],
+                    )
+                    voice_payment_crop = st.selectbox(
+                        "Pretende pagar com",
+                        payment_options,
+                        index=payment_index,
+                    )
+                    voice_season = st.selectbox(
+                        "Safra relacionada",
+                        season_labels,
+                        index=season_index,
+                    )
+                    voice_notes = st.text_area(
+                        "Observação",
+                        value=draft["notes"],
+                    )
+                    save_voice_purchase = st.form_submit_button(
+                        "Salvar compra ditada",
+                        use_container_width=True,
+                    )
+
+                if save_voice_purchase:
+                    if save_purchase_record(
+                        voice_description,
+                        voice_category,
+                        voice_supplier,
+                        voice_total,
+                        voice_purchase_date,
+                        voice_due_date,
+                        voice_payment_crop,
+                        voice_season,
+                        voice_notes,
+                    ):
+                        st.session_state.pop("voice_purchase_draft", None)
+
+        with st.expander("⌨️ Lançamento manual", expanded=True):
             with st.form("new_commitment", clear_on_submit=True):
                 description = st.text_input("O que foi comprado?")
-                category = st.selectbox(
-                    "Categoria",
-                    ["Sementes", "Fertilizantes", "Defensivos", "Máquinas", "Custeio", "Arrendamento", "Outro"],
-                )
+                category = st.selectbox("Categoria", categories)
                 supplier = st.text_input("Fornecedor")
-                c1, c2 = st.columns(2)
-                total_value = c1.number_input("Valor total (R$)", min_value=0.0)
-                due_date = c2.date_input("Vencimento")
+                c1, c2, c3 = st.columns(3)
+                total_value = c1.number_input(
+                    "Valor total (R$)",
+                    min_value=0.0,
+                )
+                purchase_date = c2.date_input(
+                    "Data da compra",
+                    value=date.today(),
+                )
+                due_date = c3.date_input("Vencimento")
                 payment_crop = st.selectbox(
                     "Pretende pagar com",
-                    ["Soja", "Milho", "Trigo", "Canola", "Caixa", "Mais de uma"],
+                    payment_options,
                 )
-                selected_season = st.selectbox("Safra relacionada", list(season_map))
+                selected_season = st.selectbox(
+                    "Safra relacionada",
+                    list(season_map),
+                )
                 notes = st.text_area("Observação")
-                submit = st.form_submit_button("Salvar compra", use_container_width=True)
+                submit = st.form_submit_button(
+                    "Salvar compra",
+                    use_container_width=True,
+                )
 
             if submit:
-                if not description.strip() or total_value <= 0:
-                    st.error("Informe a descrição e o valor.")
-                else:
-                    try:
-                        commitment_id = insert_id(
-                            """INSERT INTO commitments
-                               (season_id,category,description,supplier,total_value,due_date,
-                                payment_crop,notes,status,created_by)
-                               VALUES(:s,:c,:d,:f,:v,:dt,:p,:n,'aberto',:u)""",
-                            {
-                                "s": season_map[selected_season],
-                                "c": category,
-                                "d": description.strip(),
-                                "f": supplier.strip(),
-                                "v": total_value,
-                                "dt": due_date,
-                                "p": payment_crop,
-                                "n": notes.strip(),
-                                "u": user["id"],
-                            },
-                        )
-                        log_action(
-                            user["id"],
-                            "criou",
-                            "compromisso",
-                            commitment_id,
-                            description.strip(),
-                        )
-                        st.session_state.current_page = "🛒 Compras"
-                        st.session_state.purchase_saved = (
-                            f"Compra salva com sucesso: {description.strip()}."
-                        )
-                    except Exception as error:
-                        st.error(
-                            "Não foi possível salvar a compra. "
-                            "Nenhum dado foi perdido da tela."
-                        )
-                        st.exception(error)
-
-            if st.session_state.pop("purchase_saved", None):
-                st.success("Compra salva com sucesso.")
+                save_purchase_record(
+                    description,
+                    category,
+                    supplier,
+                    total_value,
+                    purchase_date,
+                    due_date,
+                    payment_crop,
+                    selected_season,
+                    notes,
+                )
 
     commitments = q(
         """SELECT * FROM commitments
@@ -581,10 +745,128 @@ elif page == "🛒 Compras":
         icon = "🟢" if status["pct"] >= 99 else "🟡" if status["pct"] >= 50 else "🔴"
         with st.expander(f"{icon} {item['description']} · {item['due_date']}"):
             st.write(f"**Valor:** {money(item['total_value'])}")
+            st.write(
+                f"**Data da compra:** "
+                f"{item.get('purchase_date') or 'Não informada'}"
+            )
+            st.write(f"**Vencimento:** {item['due_date'] or 'Não informado'}")
             st.write(f"**Fornecedor:** {item['supplier'] or 'Não informado'}")
             st.write(f"**Protegido por vendas:** {money(status['protected'])}")
             st.write(f"**Pago:** {money(status['paid'])}")
             st.write(f"**Ainda falta:** {money(status['remaining'])}")
+
+            if CAN_EDIT:
+                with st.expander("✏️ Editar esta compra"):
+                    season_labels = list(season_map)
+                    current_season_label = "Nenhuma"
+                    for label, season_id in season_map.items():
+                        if season_id == item.get("season_id"):
+                            current_season_label = label
+                            break
+
+                    current_category = (
+                        item.get("category")
+                        if item.get("category") in categories
+                        else "Outro"
+                    )
+                    current_payment = (
+                        item.get("payment_crop")
+                        if item.get("payment_crop") in payment_options
+                        else "Caixa"
+                    )
+
+                    with st.form(f"edit_purchase_{item['id']}"):
+                        edit_description = st.text_input(
+                            "O que foi comprado?",
+                            value=item.get("description") or "",
+                        )
+                        edit_category = st.selectbox(
+                            "Categoria",
+                            categories,
+                            index=categories.index(current_category),
+                        )
+                        edit_supplier = st.text_input(
+                            "Fornecedor",
+                            value=item.get("supplier") or "",
+                        )
+
+                        e1, e2, e3 = st.columns(3)
+                        edit_value = e1.number_input(
+                            "Valor total (R$)",
+                            min_value=0.0,
+                            value=float(item.get("total_value") or 0),
+                            step=100.0,
+                        )
+                        edit_purchase_date = e2.date_input(
+                            "Data da compra",
+                            value=item.get("purchase_date") or date.today(),
+                        )
+                        edit_due_date = e3.date_input(
+                            "Vencimento",
+                            value=item.get("due_date") or date.today(),
+                        )
+
+                        edit_payment_crop = st.selectbox(
+                            "Pretende pagar com",
+                            payment_options,
+                            index=payment_options.index(current_payment),
+                        )
+                        edit_season = st.selectbox(
+                            "Safra relacionada",
+                            season_labels,
+                            index=season_labels.index(current_season_label),
+                        )
+                        edit_notes = st.text_area(
+                            "Observação",
+                            value=item.get("notes") or "",
+                        )
+                        save_edit = st.form_submit_button(
+                            "Salvar alterações",
+                            use_container_width=True,
+                        )
+
+                    if save_edit:
+                        if not edit_description.strip() or edit_value <= 0:
+                            st.error("Informe a descrição e o valor.")
+                        else:
+                            try:
+                                ex(
+                                    """UPDATE commitments
+                                       SET season_id=:s,
+                                           category=:c,
+                                           description=:d,
+                                           supplier=:f,
+                                           total_value=:v,
+                                           purchase_date=:pd,
+                                           due_date=:dt,
+                                           payment_crop=:p,
+                                           notes=:n
+                                       WHERE id=:id""",
+                                    {
+                                        "s": season_map[edit_season],
+                                        "c": edit_category,
+                                        "d": edit_description.strip(),
+                                        "f": edit_supplier.strip(),
+                                        "v": edit_value,
+                                        "pd": edit_purchase_date,
+                                        "dt": edit_due_date,
+                                        "p": edit_payment_crop,
+                                        "n": edit_notes.strip(),
+                                        "id": item["id"],
+                                    },
+                                )
+                                log_action(
+                                    user["id"],
+                                    "editou",
+                                    "compromisso",
+                                    item["id"],
+                                    edit_description.strip(),
+                                )
+                                st.session_state.current_page = "🛒 Compras"
+                                st.success("Compra atualizada com sucesso.")
+                            except Exception as error:
+                                st.error("Não foi possível atualizar a compra.")
+                                st.exception(error)
 
             if CAN_EDIT and item.get("status", "aberto") == "aberto":
                 with st.form(f"payment_{item['id']}", clear_on_submit=True):
@@ -605,26 +887,49 @@ elif page == "🛒 Compras":
                     submit_payment = st.form_submit_button("Salvar pagamento")
 
                 if submit_payment and amount > 0:
-                    payment_id = insert_id(
-                        """INSERT INTO payments
-                           (commitment_id,payment_date,amount,notes,created_by)
-                           VALUES(:c,:d,:a,:n,:u)""",
-                        {
-                            "c": item["id"],
-                            "d": payment_date,
-                            "a": amount,
-                            "n": note.strip(),
-                            "u": user["id"],
-                        },
-                    )
-                    log_action(user["id"], "pagou", "compromisso", item["id"], money(amount))
-                    st.success("Pagamento registrado.")
-                    st.rerun()
+                    try:
+                        payment_id = insert_id(
+                            """INSERT INTO payments
+                               (commitment_id,payment_date,amount,notes,created_by)
+                               VALUES(:c,:d,:a,:n,:u)""",
+                            {
+                                "c": item["id"],
+                                "d": payment_date,
+                                "a": amount,
+                                "n": note.strip(),
+                                "u": user["id"],
+                            },
+                        )
+                        log_action(
+                            user["id"],
+                            "pagou",
+                            "compromisso",
+                            item["id"],
+                            money(amount),
+                        )
+                        st.session_state.current_page = "🛒 Compras"
+                        st.success("Pagamento registrado.")
+                    except Exception as error:
+                        st.error("Não foi possível registrar o pagamento.")
+                        st.exception(error)
 
-                if st.button("Marcar como encerrado", key=f"close_commitment_{item['id']}"):
-                    ex("UPDATE commitments SET status='encerrado' WHERE id=:id", {"id": item["id"]})
-                    log_action(user["id"], "encerrou", "compromisso", item["id"], item["description"])
-                    st.rerun()
+                if st.button(
+                    "Marcar como encerrado",
+                    key=f"close_commitment_{item['id']}",
+                ):
+                    ex(
+                        "UPDATE commitments SET status='encerrado' WHERE id=:id",
+                        {"id": item["id"]},
+                    )
+                    log_action(
+                        user["id"],
+                        "encerrou",
+                        "compromisso",
+                        item["id"],
+                        item["description"],
+                    )
+                    st.session_state.current_page = "🛒 Compras"
+                    st.success("Compromisso encerrado.")
 
 
 elif page == "💰 Vendas":
