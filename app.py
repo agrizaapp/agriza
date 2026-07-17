@@ -26,6 +26,19 @@ from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
 
 
+def confirmation_card(title, rows, total_label=None, total_value=None, warnings=None):
+    st.markdown(f"### {title}")
+    for label, value in rows:
+        st.markdown(f"**{label}:** {value}")
+    if total_label is not None:
+        st.markdown(f"### {total_label}: {total_value}")
+    if warnings:
+        for warning in warnings:
+            st.warning(warning)
+
+
+
+
 apply_page_config()
 apply_global_style()
 init_db()
@@ -42,7 +55,7 @@ if "session_cleanup_done" not in st.session_state:
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
-st.caption("Versão ativa: AGRIZA v8 · login lembrado + compras parceladas")
+st.caption("Versão ativa: AGRIZA v10.3 · confirmação antes de salvar")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
@@ -173,7 +186,9 @@ pages = [
     "🏠 Painel",
     "🌾 Safras",
     "🛒 Compras",
+    "🚜 Máquinas e financiamentos",
     "💰 Vendas",
+    "🤖 AgroIA",
     "📈 Mercado",
     "🧪 Teste 7 dias",
 ]
@@ -670,47 +685,29 @@ elif page == "🛒 Compras":
     if CAN_EDIT:
         with st.expander("📄 COMPRA PARCELADA / CONTRATO", expanded=True):
             st.info(
-                "Use para máquinas, financiamentos, arrendamentos e compras com "
-                "vários vencimentos. Cada parcela pode ser vinculada a uma cultura."
+                "Use para máquinas, financiamentos, arrendamentos e compras "
+                "com vários vencimentos. Cada parcela pode ter uma cultura "
+                "de pagamento diferente."
             )
 
             use_planter_example = st.checkbox(
                 "Preencher exemplo da plantadeira",
                 value=False,
-                key="use_planter_example",
+                key="use_planter_example_v101",
             )
 
-            if use_planter_example:
-                default_contract_description = "Plantadeira"
-                default_contract_value = 405000.0
-                default_installments = pd.DataFrame(
-                    [
-                        {"Parcela": 1, "Vencimento": date(2026, 11, 20),
-                         "Valor (R$)": 60000.0, "Pagar com": "Trigo"},
-                        {"Parcela": 2, "Vencimento": date(2027, 5, 20),
-                         "Valor (R$)": 115000.0, "Pagar com": "Soja"},
-                        {"Parcela": 3, "Vencimento": date(2028, 5, 20),
-                         "Valor (R$)": 115000.0, "Pagar com": "Soja"},
-                        {"Parcela": 4, "Vencimento": date(2029, 5, 20),
-                         "Valor (R$)": 115000.0, "Pagar com": "Soja"},
-                    ]
-                )
-            else:
-                default_contract_description = ""
-                default_contract_value = 0.0
-                default_installments = pd.DataFrame(
-                    [
-                        {"Parcela": 1, "Vencimento": date.today(),
-                         "Valor (R$)": 0.0, "Pagar com": "Caixa"}
-                    ]
-                )
+            default_description = "Plantadeira" if use_planter_example else ""
+            default_total = 405000.0 if use_planter_example else 0.0
+            default_count = 4 if use_planter_example else 1
 
-            with st.form("new_installment_contract"):
+            with st.form("new_installment_contract_v101", clear_on_submit=False):
                 contract_description = st.text_input(
                     "Descrição da compra",
-                    value=default_contract_description,
+                    value=default_description,
+                    placeholder="Ex.: Plantadeira 13 linhas",
                 )
                 contract_supplier = st.text_input("Fornecedor / vendedor")
+
                 cc1, cc2, cc3 = st.columns(3)
                 contract_category = cc1.selectbox(
                     "Categoria",
@@ -720,37 +717,83 @@ elif page == "🛒 Compras":
                 contract_purchase_date = cc2.date_input(
                     "Data da compra",
                     value=date.today(),
+                    format="DD/MM/YYYY",
                 )
                 contract_total = cc3.number_input(
                     "Valor total contratado (R$)",
                     min_value=0.0,
-                    value=default_contract_value,
+                    value=default_total,
                     step=1000.0,
                 )
+
+                installment_count = st.number_input(
+                    "Quantidade de parcelas",
+                    min_value=1,
+                    max_value=20,
+                    value=default_count,
+                    step=1,
+                )
+
                 contract_notes = st.text_area("Observações do contrato")
 
-                edited_installments = st.data_editor(
-                    default_installments,
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Parcela": st.column_config.NumberColumn(
-                            "Parcela", min_value=1, step=1, required=True
-                        ),
-                        "Vencimento": st.column_config.DateColumn(
-                            "Vencimento", required=True, format="DD/MM/YYYY"
-                        ),
-                        "Valor (R$)": st.column_config.NumberColumn(
-                            "Valor (R$)", min_value=0.01, step=100.0,
-                            required=True, format="R$ %.2f"
-                        ),
-                        "Pagar com": st.column_config.SelectboxColumn(
-                            "Pagar com", options=payment_options, required=True
-                        ),
-                    },
-                    key="contract_installments_editor",
-                )
+                st.markdown("#### Parcelas")
+                installment_rows = []
+
+                example_dates = [
+                    date(2026, 11, 20),
+                    date(2027, 5, 20),
+                    date(2028, 5, 20),
+                    date(2029, 5, 20),
+                ]
+                example_values = [60000.0, 115000.0, 115000.0, 115000.0]
+                example_crops = ["Trigo", "Soja", "Soja", "Soja"]
+
+                for index in range(int(installment_count)):
+                    st.markdown(f"**Parcela {index + 1}**")
+                    pc1, pc2, pc3 = st.columns(3)
+
+                    if use_planter_example and index < 4:
+                        default_due = example_dates[index]
+                        default_value = example_values[index]
+                        default_crop = example_crops[index]
+                    else:
+                        default_due = date.today()
+                        default_value = 0.0
+                        default_crop = "Caixa"
+
+                    due_date_value = pc1.date_input(
+                        "Vencimento",
+                        value=default_due,
+                        format="DD/MM/YYYY",
+                        key=f"contract_due_v101_{index}",
+                    )
+                    amount_value = pc2.number_input(
+                        "Valor (R$)",
+                        min_value=0.0,
+                        value=default_value,
+                        step=1000.0,
+                        key=f"contract_amount_v101_{index}",
+                    )
+                    crop_index = (
+                        payment_options.index(default_crop)
+                        if default_crop in payment_options
+                        else 0
+                    )
+                    payment_crop_value = pc3.selectbox(
+                        "Pagar com",
+                        payment_options,
+                        index=crop_index,
+                        key=f"contract_crop_v101_{index}",
+                    )
+
+                    installment_rows.append(
+                        {
+                            "Parcela": index + 1,
+                            "Vencimento": due_date_value,
+                            "Valor (R$)": amount_value,
+                            "Pagar com": payment_crop_value,
+                        }
+                    )
 
                 save_contract = st.form_submit_button(
                     "Salvar contrato e parcelas",
@@ -758,24 +801,26 @@ elif page == "🛒 Compras":
                 )
 
             if save_contract:
-                rows = edited_installments.to_dict("records")
-                rows = [
-                    row for row in rows
-                    if row.get("Vencimento") is not None
-                    and float(row.get("Valor (R$)") or 0) > 0
+                valid_rows = [
+                    row for row in installment_rows
+                    if float(row["Valor (R$)"] or 0) > 0
                 ]
-                installment_sum = sum(float(row["Valor (R$)"]) for row in rows)
+                installment_sum = sum(
+                    float(row["Valor (R$)"]) for row in valid_rows
+                )
 
                 if not contract_description.strip():
                     st.error("Informe a descrição da compra.")
                 elif contract_total <= 0:
                     st.error("Informe o valor total contratado.")
-                elif not rows:
-                    st.error("Informe pelo menos uma parcela válida.")
+                elif not valid_rows:
+                    st.error("Informe ao menos uma parcela com valor.")
+                elif len(valid_rows) != int(installment_count):
+                    st.error("Todas as parcelas precisam ter valor maior que zero.")
                 elif abs(installment_sum - contract_total) > 0.01:
                     st.error(
-                        f"A soma das parcelas é {money(installment_sum)}, mas o "
-                        f"contrato é {money(contract_total)}."
+                        f"A soma das parcelas é {money(installment_sum)}, "
+                        f"mas o contrato é {money(contract_total)}."
                     )
                 else:
                     try:
@@ -795,8 +840,8 @@ elif page == "🛒 Compras":
                             },
                         )
 
-                        for position, row in enumerate(rows, start=1):
-                            installment_no = int(row.get("Parcela") or position)
+                        for row in valid_rows:
+                            installment_no = int(row["Parcela"])
                             insert_id(
                                 """INSERT INTO commitments
                                    (contract_id,installment_no,season_id,category,
@@ -828,10 +873,10 @@ elif page == "🛒 Compras":
                             "contrato_compra",
                             contract_id,
                             f"{contract_description.strip()} · "
-                            f"{len(rows)} parcelas · {money(contract_total)}",
+                            f"{len(valid_rows)} parcelas · {money(contract_total)}",
                         )
                         st.success(
-                            f"Contrato salvo com {len(rows)} parcelas."
+                            f"Contrato salvo com {len(valid_rows)} parcelas."
                         )
                         st.session_state.current_page = "🛒 Compras"
                     except Exception as error:
@@ -840,9 +885,19 @@ elif page == "🛒 Compras":
 
         with st.expander("🎙️ Lançamento rápido por voz", expanded=False):
             st.info(
-                "No celular, toque no campo e use o microfone do teclado. "
-                "Exemplo: “Comprei fertilizante da Cooperativa Alfa por "
-                "35 mil reais, vence em 30 dias, para a safra de milho”."
+                "Toque no campo e use o microfone do teclado do celular. "
+                "Fale em uma frase com produto, fornecedor, valor, vencimento "
+                "e cultura de pagamento."
+            )
+            st.code(
+                "Comprei uma plantadeira do fornecedor Agro Máquinas por "
+                "405 mil reais, vencimento dia 20 de novembro de 2026, "
+                "pagar com trigo",
+                language=None,
+            )
+            st.caption(
+                "Também entende valores como “trinta e cinco mil reais”, "
+                "datas faladas e números com ponto ou vírgula."
             )
 
             with st.form("voice_purchase_interpret"):
@@ -870,7 +925,14 @@ elif page == "🛒 Compras":
 
             draft = st.session_state.get("voice_purchase_draft")
             if draft:
-                st.caption("Confira ou corrija os dados antes de salvar.")
+                if draft.get("missing"):
+                    st.warning(
+                        "Não consegui identificar automaticamente: "
+                        + ", ".join(draft["missing"])
+                        + ". Preencha esses campos abaixo."
+                    )
+                else:
+                    st.success("Dados principais identificados. Confira antes de salvar.")
 
                 season_labels = list(season_map)
                 season_index = (
@@ -1252,6 +1314,323 @@ elif page == "🛒 Compras":
                     st.success("Compromisso encerrado.")
 
 
+elif page == "🚜 Máquinas e financiamentos":
+    st.subheader("Máquinas e financiamentos")
+    st.success(
+        "Cadastre aqui a plantadeira e todas as parcelas da compra, "
+        "em um único passo."
+    )
+
+    tab_new, tab_list = st.tabs(
+        ["➕ Cadastrar máquina financiada", "📋 Máquinas cadastradas"]
+    )
+
+    with tab_new:
+        st.markdown("### 1. Dados da máquina")
+
+        use_planter = st.checkbox(
+            "Usar o exemplo da minha plantadeira",
+            value=True,
+            key="machine_planter_example_v102",
+        )
+
+        if use_planter:
+            default_machine_name = "Plantadeira"
+            default_contract_value = 405000.0
+            default_count = 4
+        else:
+            default_machine_name = ""
+            default_contract_value = 0.0
+            default_count = 1
+
+        with st.form("machine_financing_v102", clear_on_submit=False):
+            m1, m2 = st.columns(2)
+            machine_name = m1.text_input(
+                "Nome da máquina ou implemento",
+                value=default_machine_name,
+                placeholder="Ex.: Plantadeira 13 linhas",
+            )
+            supplier = m2.text_input(
+                "Fornecedor / vendedor",
+                placeholder="Ex.: Agro Máquinas",
+            )
+
+            m3, m4, m5 = st.columns(3)
+            brand = m3.text_input("Marca")
+            model = m4.text_input("Modelo")
+            machine_year = m5.number_input(
+                "Ano",
+                min_value=1950,
+                max_value=2100,
+                value=date.today().year,
+                step=1,
+            )
+
+            m6, m7 = st.columns(2)
+            purchase_date = m6.date_input(
+                "Data da compra",
+                value=date.today(),
+                format="DD/MM/YYYY",
+            )
+            total_value = m7.number_input(
+                "Valor total da compra (R$)",
+                min_value=0.0,
+                value=default_contract_value,
+                step=1000.0,
+            )
+
+            notes = st.text_area(
+                "Observações",
+                value="Entrada mais 3 parcelas anuais" if use_planter else "",
+            )
+
+            st.markdown("### 2. Parcelas do financiamento")
+            installment_count = st.number_input(
+                "Quantas parcelas serão pagas?",
+                min_value=1,
+                max_value=20,
+                value=default_count,
+                step=1,
+            )
+
+            example_dates = [
+                date(2026, 11, 20),
+                date(2027, 5, 20),
+                date(2028, 5, 20),
+                date(2029, 5, 20),
+            ]
+            example_values = [60000.0, 115000.0, 115000.0, 115000.0]
+            example_crops = ["Trigo", "Soja", "Soja", "Soja"]
+
+            rows = []
+            for index in range(int(installment_count)):
+                st.markdown(f"#### Parcela {index + 1}")
+                p1, p2, p3 = st.columns(3)
+
+                if use_planter and index < 4:
+                    due_default = example_dates[index]
+                    value_default = example_values[index]
+                    crop_default = example_crops[index]
+                else:
+                    due_default = date.today()
+                    value_default = 0.0
+                    crop_default = "Caixa"
+
+                due_date_value = p1.date_input(
+                    "Vencimento",
+                    value=due_default,
+                    format="DD/MM/YYYY",
+                    key=f"machine_due_v102_{index}",
+                )
+                installment_value = p2.number_input(
+                    "Valor da parcela (R$)",
+                    min_value=0.0,
+                    value=value_default,
+                    step=1000.0,
+                    key=f"machine_value_v102_{index}",
+                )
+                crop_index = (
+                    payment_options.index(crop_default)
+                    if crop_default in payment_options
+                    else 0
+                )
+                payment_crop_value = p3.selectbox(
+                    "Será paga com",
+                    payment_options,
+                    index=crop_index,
+                    key=f"machine_crop_v102_{index}",
+                )
+
+                rows.append(
+                    {
+                        "number": index + 1,
+                        "due_date": due_date_value,
+                        "value": installment_value,
+                        "crop": payment_crop_value,
+                    }
+                )
+
+            submitted = st.form_submit_button(
+                "✅ Salvar máquina e parcelas",
+                use_container_width=True,
+            )
+
+        if submitted:
+            valid_rows = [row for row in rows if float(row["value"] or 0) > 0]
+            installment_sum = sum(float(row["value"]) for row in valid_rows)
+
+            if not machine_name.strip():
+                st.error("Informe o nome da máquina.")
+            elif total_value <= 0:
+                st.error("Informe o valor total da compra.")
+            elif len(valid_rows) != int(installment_count):
+                st.error("Preencha o valor de todas as parcelas.")
+            elif abs(installment_sum - total_value) > 0.01:
+                st.error(
+                    f"A soma das parcelas é {money(installment_sum)}, "
+                    f"mas o valor total da compra é {money(total_value)}."
+                )
+            else:
+                st.session_state.machine_draft_v103 = {
+                    "machine_name": machine_name.strip(),
+                    "supplier": supplier.strip(),
+                    "brand": brand.strip(),
+                    "model": model.strip(),
+                    "year": int(machine_year),
+                    "purchase_date": purchase_date,
+                    "total_value": float(total_value),
+                    "notes": notes.strip(),
+                    "rows": valid_rows,
+                }
+
+        d = st.session_state.get("machine_draft_v103")
+        if d:
+            st.markdown("---")
+            confirmation_card(
+                "🚜 Confirme a máquina e as parcelas",
+                [
+                    ("Máquina", d["machine_name"]),
+                    ("Fornecedor", d["supplier"] or "Não informado"),
+                    ("Marca/modelo", f"{d['brand'] or '—'} {d['model'] or ''}".strip()),
+                    ("Data da compra", d["purchase_date"].strftime("%d/%m/%Y")),
+                    ("Quantidade de parcelas", len(d["rows"])),
+                ],
+                "Valor total",
+                money(d["total_value"]),
+            )
+            for row in d["rows"]:
+                st.write(
+                    f"**Parcela {row['number']}** — "
+                    f"{row['due_date'].strftime('%d/%m/%Y')} — "
+                    f"{money(row['value'])} — pagar com **{row['crop']}**"
+                )
+
+            c1, c2, c3 = st.columns(3)
+            confirm_machine = c1.button(
+                "✅ Confirmar e salvar", use_container_width=True,
+                key="confirm_machine_v103"
+            )
+            correct_machine = c2.button(
+                "✏️ Corrigir informações", use_container_width=True,
+                key="correct_machine_v103"
+            )
+            discard_machine = c3.button(
+                "🗑️ Descartar lançamento", use_container_width=True,
+                key="discard_machine_v103"
+            )
+
+            if discard_machine:
+                del st.session_state.machine_draft_v103
+                st.info("Lançamento descartado. Nada foi salvo.")
+                st.rerun()
+
+            if correct_machine:
+                del st.session_state.machine_draft_v103
+                st.info("Corrija os campos acima e gere o resumo novamente.")
+                st.rerun()
+
+            if confirm_machine:
+                try:
+                    contract_id = insert_id(
+                        """INSERT INTO purchase_contracts
+                           (description,supplier,category,total_value,
+                            purchase_date,notes,status,created_by)
+                           VALUES(:d,:f,'Máquinas',:v,:pd,:n,'aberto',:u)""",
+                        {
+                            "d": d["machine_name"], "f": d["supplier"],
+                            "v": d["total_value"], "pd": d["purchase_date"],
+                            "n": d["notes"], "u": user["id"],
+                        },
+                    )
+                    machine_id = insert_id(
+                        """INSERT INTO machinery
+                           (name,brand,model,year,acquisition_date,
+                            acquisition_value,contract_id,status,notes,created_by)
+                           VALUES(:n,:b,:m,:y,:d,:v,:c,'ativo',:o,:u)""",
+                        {
+                            "n": d["machine_name"], "b": d["brand"],
+                            "m": d["model"], "y": d["year"],
+                            "d": d["purchase_date"], "v": d["total_value"],
+                            "c": contract_id, "o": d["notes"],
+                            "u": user["id"],
+                        },
+                    )
+                    for row in d["rows"]:
+                        insert_id(
+                            """INSERT INTO commitments
+                               (contract_id,installment_no,season_id,category,
+                                description,supplier,total_value,purchase_date,
+                                due_date,payment_crop,notes,status,created_by)
+                               VALUES(:ct,:ino,NULL,'Máquinas',:d,:f,:v,:pd,
+                                      :dt,:p,:n,'aberto',:u)""",
+                            {
+                                "ct": contract_id, "ino": row["number"],
+                                "d": f"{d['machine_name']} · Parcela {row['number']}",
+                                "f": d["supplier"], "v": float(row["value"]),
+                                "pd": d["purchase_date"], "dt": row["due_date"],
+                                "p": row["crop"], "n": d["notes"],
+                                "u": user["id"],
+                            },
+                        )
+                    log_action(
+                        user["id"], "criou", "maquina_financiada",
+                        machine_id, f"{d['machine_name']} · {len(d['rows'])} parcelas"
+                    )
+                    del st.session_state.machine_draft_v103
+                    st.success("Máquina e parcelas salvas com sucesso.")
+                    st.rerun()
+                except Exception as error:
+                    st.error("Não foi possível salvar a máquina e as parcelas.")
+                    st.exception(error)
+
+    with tab_list:
+        machines = q(
+            """SELECT m.*,pc.description AS contract_description,
+                      pc.total_value AS contract_total
+               FROM machinery m
+               LEFT JOIN purchase_contracts pc ON pc.id=m.contract_id
+               WHERE COALESCE(m.status,'ativo')!='excluido'
+               ORDER BY m.id DESC"""
+        )
+
+        if not machines:
+            st.info("Nenhuma máquina cadastrada.")
+        else:
+            for machine in machines:
+                with st.expander(f"🚜 {machine['name']}", expanded=False):
+                    st.write(
+                        f"**Marca/modelo:** "
+                        f"{machine.get('brand') or '—'} "
+                        f"{machine.get('model') or ''}"
+                    )
+                    st.write(
+                        f"**Valor da compra:** "
+                        f"{money(machine.get('contract_total') or machine.get('acquisition_value') or 0)}"
+                    )
+
+                    installments = q(
+                        """SELECT * FROM commitments
+                           WHERE contract_id=:id
+                             AND COALESCE(status,'aberto')!='cancelado'
+                           ORDER BY installment_no""",
+                        {"id": machine.get("contract_id")},
+                    )
+
+                    if installments:
+                        st.markdown("#### Parcelas")
+                        for installment in installments:
+                            status = commitment_status(installment["id"])
+                            mark = "✅" if status["remaining"] <= 0.01 else "◯"
+                            st.write(
+                                f"{mark} **Parcela "
+                                f"{installment.get('installment_no') or '-'}** — "
+                                f"{installment.get('due_date')} — "
+                                f"{money(installment.get('total_value') or 0)} — "
+                                f"pagar com **"
+                                f"{installment.get('payment_crop') or 'Caixa'}** — "
+                                f"falta {money(status['remaining'])}"
+                            )
+
 elif page == "💰 Vendas":
     st.subheader("Comercialização")
     seasons = q("SELECT id,name,crop FROM seasons WHERE active=TRUE ORDER BY id DESC")
@@ -1329,8 +1708,17 @@ elif page == "💰 Vendas":
         if CAN_EDIT:
             with st.expander("🎙️ Lançamento rápido por voz", expanded=False):
                 st.info(
-                    "No celular, toque no campo abaixo e use o microfone do teclado. "
-                    "Exemplo: “Vendi 500 sacas de milho a 72 reais para Cooperativa Alfa hoje”."
+                    "Toque no campo e use o microfone do teclado do celular. "
+                    "Fale quantidade, cultura, preço, comprador e data."
+                )
+                st.code(
+                    "Vendi quinhentas sacas de milho a 72 reais por saca "
+                    "para Cooperativa Alfa hoje",
+                    language=None,
+                )
+                st.caption(
+                    "Também aceita “500 sacas”, datas como 20/11/2026 "
+                    "ou “20 de novembro de 2026”."
                 )
                 with st.form("voice_sale_interpret"):
                     spoken_text = st.text_area(
@@ -1357,7 +1745,14 @@ elif page == "💰 Vendas":
 
                 draft = st.session_state.get("voice_sale_draft")
                 if draft:
-                    st.caption("Confira os dados interpretados antes de salvar.")
+                    if draft.get("missing"):
+                        st.warning(
+                            "Não consegui identificar automaticamente: "
+                            + ", ".join(draft["missing"])
+                            + ". Preencha esses campos abaixo."
+                        )
+                    else:
+                        st.success("Dados principais identificados. Confira antes de salvar.")
                     labels = list(season_map)
                     default_season = (
                         labels.index(draft["season_label"])
@@ -1467,6 +1862,125 @@ elif page == "💰 Vendas":
             unsafe_allow_html=True,
         )
 
+
+elif page == "🤖 AgroIA":
+    st.subheader("Assistente AgroIA")
+    st.caption(
+        "Resumo inteligente baseado nos dados cadastrados no AGRIZA."
+    )
+
+    open_commitments = q(
+        """SELECT * FROM commitments
+           WHERE COALESCE(status,'aberto')='aberto'
+           ORDER BY due_date"""
+    )
+    active_seasons = q(
+        "SELECT * FROM seasons WHERE active=TRUE ORDER BY id DESC"
+    )
+    recent_sales = q(
+        """SELECT s.*,se.crop,se.name AS season_name
+           FROM sales s
+           LEFT JOIN seasons se ON se.id=s.season_id
+           ORDER BY s.sale_date DESC,s.id DESC
+           LIMIT 10"""
+    )
+
+    total_open = 0.0
+    by_crop = {}
+    for commitment in open_commitments:
+        status = commitment_status(commitment["id"])
+        remaining = float(status["remaining"])
+        total_open += remaining
+        crop = commitment.get("payment_crop") or "Caixa"
+        by_crop[crop] = by_crop.get(crop, 0.0) + remaining
+
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Compromissos em aberto", money(total_open))
+    a2.metric("Safras ativas", len(active_seasons))
+    a3.metric("Vendas recentes", len(recent_sales))
+
+    st.markdown("### Alertas financeiros")
+    if not open_commitments:
+        st.success("Não há compromissos em aberto.")
+    else:
+        today = date.today()
+        urgent = []
+        for commitment in open_commitments:
+            due = commitment.get("due_date")
+            if isinstance(due, str):
+                due = date.fromisoformat(due)
+            days = (due - today).days if due else 99999
+            status = commitment_status(commitment["id"])
+            if status["remaining"] > 0 and days <= 90:
+                urgent.append((days, commitment, status))
+        if urgent:
+            for days, commitment, status in urgent[:8]:
+                if days < 0:
+                    label = f"vencido há {abs(days)} dias"
+                elif days == 0:
+                    label = "vence hoje"
+                else:
+                    label = f"vence em {days} dias"
+                st.warning(
+                    f"{commitment['description']}: "
+                    f"{money(status['remaining'])} restantes, {label}. "
+                    f"Fonte prevista: {commitment.get('payment_crop') or 'Caixa'}."
+                )
+        else:
+            st.info("Nenhum vencimento em aberto nos próximos 90 dias.")
+
+    st.markdown("### Necessidade por cultura")
+    if by_crop:
+        crop_df = pd.DataFrame(
+            [
+                {"Cultura/Fonte": crop, "Valor necessário": value}
+                for crop, value in sorted(
+                    by_crop.items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )
+            ]
+        )
+        st.dataframe(
+            crop_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Valor necessário": st.column_config.NumberColumn(
+                    "Valor necessário",
+                    format="R$ %.2f",
+                )
+            },
+        )
+
+    st.markdown("### Pergunta rápida")
+    question = st.text_input(
+        "Pergunte sobre seus dados",
+        placeholder="Ex.: quanto preciso de soja para pagar os compromissos?",
+    )
+    if question:
+        normalized = question.lower()
+        answered = False
+        for crop, value in by_crop.items():
+            if crop.lower() in normalized:
+                st.info(
+                    f"Os compromissos vinculados a {crop} somam "
+                    f"{money(value)} em saldo aberto."
+                )
+                answered = True
+        if "total" in normalized or "compromiss" in normalized:
+            st.info(
+                f"O saldo total dos compromissos em aberto é {money(total_open)}."
+            )
+            answered = True
+        if "safra" in normalized:
+            st.info(f"Existem {len(active_seasons)} safras ativas.")
+            answered = True
+        if not answered:
+            st.info(
+                "Posso responder sobre compromissos, culturas de pagamento, "
+                "safras ativas e vencimentos cadastrados."
+            )
 
 elif page == "📈 Mercado":
     st.subheader("Mercado")

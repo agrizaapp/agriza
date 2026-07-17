@@ -79,6 +79,21 @@ def init_db():
             created_by INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
+        f"""CREATE TABLE IF NOT EXISTS machinery(
+            id {id_def},
+            name VARCHAR(180) NOT NULL,
+            brand VARCHAR(120),
+            model VARCHAR(120),
+            year INTEGER,
+            serial_number VARCHAR(120),
+            acquisition_date DATE,
+            acquisition_value NUMERIC(16,2),
+            contract_id INTEGER,
+            status VARCHAR(40) NOT NULL DEFAULT 'ativo',
+            notes TEXT,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
         f"""CREATE TABLE IF NOT EXISTS purchase_contracts(
             id {id_def},
             description VARCHAR(240) NOT NULL,
