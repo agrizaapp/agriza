@@ -24,3 +24,9 @@ substituir somente o arquivo do módulo alterado.
 
 O cabeçalho recebeu mais espaço superior, altura mínima e espaçamento próprio.
 Isso evita que o nome AGRIZA e o ícone sejam cortados em computador e celular.
+
+## Menu otimizado para celular
+
+O menu principal agora usa botões grandes, organizados em duas colunas no
+computador e empilhados no celular. A área de toque foi ampliada para facilitar
+o uso por pessoas com mãos grandes, inclusive nos botões de formulários.
