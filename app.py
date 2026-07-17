@@ -12,6 +12,7 @@ from core.security import hpw, vpw
 from core.utils import money, num
 from services.analytics import season_summary, commitment_status, agroia_recommendation
 from services.auth import setup_complete, save_setting, create_initial_admin
+from services.voice_sales import parse_spoken_sale
 
 
 apply_page_config()
@@ -274,6 +275,53 @@ elif page == "🌾 Safras":
                 f"Vendido **{num(summary['sold_pct'])}%**"
             )
 
+            if CAN_EDIT:
+                with st.expander("✏️ Editar custo da safra"):
+                    with st.form(f"edit_cost_{item['id']}"):
+                        current_cost = float(item["cost_ha"] or 0)
+                        new_cost = st.number_input(
+                            "Custo por hectare (R$)",
+                            min_value=0.0,
+                            value=current_cost,
+                            step=50.0,
+                            help=(
+                                "Altere este valor sempre que a estimativa de custo "
+                                "da safra precisar ser corrigida."
+                            ),
+                        )
+                        total_preview = new_cost * float(item["area_ha"])
+                        st.caption(
+                            f"Custo total estimado após a alteração: "
+                            f"{money(total_preview)}"
+                        )
+                        save_cost = st.form_submit_button(
+                            "Salvar novo custo",
+                            use_container_width=True,
+                        )
+
+                    if save_cost:
+                        if new_cost <= 0:
+                            st.error("Informe um custo por hectare maior que zero.")
+                        else:
+                            old_cost = current_cost
+                            ex(
+                                """UPDATE seasons
+                                   SET cost_ha=:cost
+                                   WHERE id=:id""",
+                                {"cost": new_cost, "id": item["id"]},
+                            )
+                            log_action(
+                                user["id"],
+                                "editou",
+                                "custo_safra",
+                                item["id"],
+                                f"de {old_cost:.2f} para {new_cost:.2f} por ha",
+                            )
+                            st.session_state.current_page = "🌾 Safras"
+                            st.success(
+                                f"Custo atualizado para {money(new_cost)} por hectare."
+                            )
+
             if summary["actual_production"] is not None:
                 variation_text = (
                     f"{summary['variance_pct']:+.1f}%"
@@ -481,26 +529,44 @@ elif page == "🛒 Compras":
                 if not description.strip() or total_value <= 0:
                     st.error("Informe a descrição e o valor.")
                 else:
-                    commitment_id = insert_id(
-                        """INSERT INTO commitments
-                           (season_id,category,description,supplier,total_value,due_date,
-                            payment_crop,notes,status,created_by)
-                           VALUES(:s,:c,:d,:f,:v,:dt,:p,:n,'aberto',:u)""",
-                        {
-                            "s": season_map[selected_season],
-                            "c": category,
-                            "d": description.strip(),
-                            "f": supplier.strip(),
-                            "v": total_value,
-                            "dt": due_date,
-                            "p": payment_crop,
-                            "n": notes.strip(),
-                            "u": user["id"],
-                        },
-                    )
-                    log_action(user["id"], "criou", "compromisso", commitment_id, description.strip())
-                    st.success("Compra salva.")
-                    st.rerun()
+                    try:
+                        commitment_id = insert_id(
+                            """INSERT INTO commitments
+                               (season_id,category,description,supplier,total_value,due_date,
+                                payment_crop,notes,status,created_by)
+                               VALUES(:s,:c,:d,:f,:v,:dt,:p,:n,'aberto',:u)""",
+                            {
+                                "s": season_map[selected_season],
+                                "c": category,
+                                "d": description.strip(),
+                                "f": supplier.strip(),
+                                "v": total_value,
+                                "dt": due_date,
+                                "p": payment_crop,
+                                "n": notes.strip(),
+                                "u": user["id"],
+                            },
+                        )
+                        log_action(
+                            user["id"],
+                            "criou",
+                            "compromisso",
+                            commitment_id,
+                            description.strip(),
+                        )
+                        st.session_state.current_page = "🛒 Compras"
+                        st.session_state.purchase_saved = (
+                            f"Compra salva com sucesso: {description.strip()}."
+                        )
+                    except Exception as error:
+                        st.error(
+                            "Não foi possível salvar a compra. "
+                            "Nenhum dado foi perdido da tela."
+                        )
+                        st.exception(error)
+
+            if st.session_state.pop("purchase_saved", None):
+                st.success("Compra salva com sucesso.")
 
     commitments = q(
         """SELECT * FROM commitments
@@ -579,50 +645,184 @@ elif page == "💰 Vendas":
             {f"{c['description']} · {c['due_date']}": c["id"] for c in commitments}
         )
 
-        if CAN_EDIT:
-            with st.form("new_sale", clear_on_submit=True):
-                season_label = st.selectbox("Safra", list(season_map))
-                c1, c2 = st.columns(2)
-                quantity = c1.number_input("Quantidade (sc)", min_value=0.0)
-                price = c2.number_input("Preço (R$/sc)", min_value=0.0)
-                buyer = st.text_input("Comprador/cooperativa")
-                objective = st.selectbox("Esta venda protege", list(commitment_map))
-                sale_date = st.date_input("Data da venda", value=date.today())
-                notes = st.text_area("Observação")
-                submit = st.form_submit_button("Salvar venda", use_container_width=True)
+        def save_sale_record(
+            season_label,
+            quantity,
+            price,
+            buyer,
+            objective,
+            sale_date,
+            notes,
+        ):
+            if quantity <= 0 or price <= 0:
+                st.error("Informe quantidade e preço.")
+                return False
 
-            if submit:
-                if quantity <= 0 or price <= 0:
-                    st.error("Informe quantidade e preço.")
-                else:
-                    season_id = season_map[season_label]
-                    summary = season_summary(
-                        q("SELECT * FROM seasons WHERE id=:id", {"id": season_id})[0]
+            season_id = season_map[season_label]
+            summary = season_summary(
+                q("SELECT * FROM seasons WHERE id=:id", {"id": season_id})[0]
+            )
+            if quantity > summary["balance"]:
+                st.error(
+                    f"A venda supera o saldo livre de "
+                    f"{num(summary['balance'], 0)} sc."
+                )
+                return False
+
+            try:
+                sale_id = insert_id(
+                    """INSERT INTO sales
+                       (season_id,sale_date,quantity_sc,price_sc,buyer,
+                        commitment_id,notes,created_by)
+                       VALUES(:s,:d,:q,:p,:b,:c,:n,:u)""",
+                    {
+                        "s": season_id,
+                        "d": sale_date,
+                        "q": quantity,
+                        "p": price,
+                        "b": buyer.strip(),
+                        "c": commitment_map[objective],
+                        "n": notes.strip(),
+                        "u": user["id"],
+                    },
+                )
+                log_action(
+                    user["id"],
+                    "criou",
+                    "venda",
+                    sale_id,
+                    f"{quantity} sc a {price}",
+                )
+                st.session_state.current_page = "💰 Vendas"
+                st.success("Venda salva com sucesso.")
+                return True
+            except Exception as error:
+                st.error("Não foi possível salvar a venda.")
+                st.exception(error)
+                return False
+
+        if CAN_EDIT:
+            with st.expander("🎙️ Lançamento rápido por voz", expanded=False):
+                st.info(
+                    "No celular, toque no campo abaixo e use o microfone do teclado. "
+                    "Exemplo: “Vendi 500 sacas de milho a 72 reais para Cooperativa Alfa hoje”."
+                )
+                with st.form("voice_sale_interpret"):
+                    spoken_text = st.text_area(
+                        "Dite ou escreva a venda",
+                        placeholder=(
+                            "Vendi 500 sacas de milho a 72 reais "
+                            "para Cooperativa Alfa hoje"
+                        ),
+                        height=110,
                     )
-                    if quantity > summary["balance"]:
-                        st.error(
-                            f"A venda supera o saldo livre de {num(summary['balance'], 0)} sc."
-                        )
+                    interpret = st.form_submit_button(
+                        "Interpretar lançamento",
+                        use_container_width=True,
+                    )
+
+                if interpret:
+                    if not spoken_text.strip():
+                        st.error("Dite ou escreva os dados da venda.")
                     else:
-                        sale_id = insert_id(
-                            """INSERT INTO sales
-                               (season_id,sale_date,quantity_sc,price_sc,buyer,
-                                commitment_id,notes,created_by)
-                               VALUES(:s,:d,:q,:p,:b,:c,:n,:u)""",
-                            {
-                                "s": season_id,
-                                "d": sale_date,
-                                "q": quantity,
-                                "p": price,
-                                "b": buyer.strip(),
-                                "c": commitment_map[objective],
-                                "n": notes.strip(),
-                                "u": user["id"],
-                            },
+                        st.session_state.voice_sale_draft = parse_spoken_sale(
+                            spoken_text,
+                            seasons,
                         )
-                        log_action(user["id"], "criou", "venda", sale_id, f"{quantity} sc")
-                        st.success("Venda salva.")
-                        st.rerun()
+
+                draft = st.session_state.get("voice_sale_draft")
+                if draft:
+                    st.caption("Confira os dados interpretados antes de salvar.")
+                    labels = list(season_map)
+                    default_season = (
+                        labels.index(draft["season_label"])
+                        if draft["season_label"] in labels
+                        else 0
+                    )
+                    with st.form("voice_sale_confirm"):
+                        voice_season = st.selectbox(
+                            "Safra",
+                            labels,
+                            index=default_season,
+                            key="voice_season",
+                        )
+                        vc1, vc2 = st.columns(2)
+                        voice_quantity = vc1.number_input(
+                            "Quantidade (sc)",
+                            min_value=0.0,
+                            value=float(draft["quantity"]),
+                            step=10.0,
+                            key="voice_quantity",
+                        )
+                        voice_price = vc2.number_input(
+                            "Preço (R$/sc)",
+                            min_value=0.0,
+                            value=float(draft["price"]),
+                            step=0.50,
+                            key="voice_price",
+                        )
+                        voice_buyer = st.text_input(
+                            "Comprador/cooperativa",
+                            value=draft["buyer"],
+                            key="voice_buyer",
+                        )
+                        voice_objective = st.selectbox(
+                            "Esta venda protege",
+                            list(commitment_map),
+                            key="voice_objective",
+                        )
+                        voice_date = st.date_input(
+                            "Data da venda",
+                            value=draft["sale_date"],
+                            key="voice_date",
+                        )
+                        voice_notes = st.text_area(
+                            "Observação",
+                            value=draft["notes"],
+                            key="voice_notes",
+                        )
+                        voice_save = st.form_submit_button(
+                            "Salvar venda ditada",
+                            use_container_width=True,
+                        )
+
+                    if voice_save:
+                        if save_sale_record(
+                            voice_season,
+                            voice_quantity,
+                            voice_price,
+                            voice_buyer,
+                            voice_objective,
+                            voice_date,
+                            voice_notes,
+                        ):
+                            st.session_state.pop("voice_sale_draft", None)
+
+            with st.expander("⌨️ Lançamento manual", expanded=True):
+                with st.form("new_sale", clear_on_submit=True):
+                    season_label = st.selectbox("Safra", list(season_map))
+                    c1, c2 = st.columns(2)
+                    quantity = c1.number_input("Quantidade (sc)", min_value=0.0)
+                    price = c2.number_input("Preço (R$/sc)", min_value=0.0)
+                    buyer = st.text_input("Comprador/cooperativa")
+                    objective = st.selectbox("Esta venda protege", list(commitment_map))
+                    sale_date = st.date_input("Data da venda", value=date.today())
+                    notes = st.text_area("Observação")
+                    submit = st.form_submit_button(
+                        "Salvar venda",
+                        use_container_width=True,
+                    )
+
+                if submit:
+                    save_sale_record(
+                        season_label,
+                        quantity,
+                        price,
+                        buyer,
+                        objective,
+                        sale_date,
+                        notes,
+                    )
 
     sales = q(
         """SELECT sales.*,seasons.name AS season_name,seasons.crop

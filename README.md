@@ -52,3 +52,24 @@ colhida. Ao registrar o total colhido, o sistema calcula automaticamente:
 Quando a produção fica abaixo do esperado, o formulário apresenta motivos
 simples como ano seco, excesso de chuva, geada, pragas, doenças e perdas na
 colheita. Os dados antigos são preservados por migração automática.
+
+
+## Correção da aba Compras
+
+A gravação de compras não força mais um segundo `st.rerun()` após o envio do
+formulário. Em algumas conexões móveis ou instâncias gratuitas esse segundo
+recarregamento podia interromper a sessão e devolver o usuário à tela de login.
+A compra agora é confirmada, a sessão permanece aberta e a lista é atualizada
+na própria execução do formulário. Também foi adicionado tratamento de erro
+para mostrar a falha real sem encerrar a sessão.
+
+
+## Edição de custos e vendas por voz
+
+- Cada safra ganhou uma opção simples para corrigir o custo por hectare.
+- O custo total estimado é recalculado imediatamente.
+- A aba Vendas ganhou “Lançamento rápido por voz”.
+- No celular, o agricultor usa o microfone do próprio teclado e dita uma frase.
+- O AGRIZA interpreta quantidade, preço, cultura/safra, comprador e data.
+- Antes de salvar, todos os campos aparecem para conferência e correção.
+- O lançamento manual continua disponível.
