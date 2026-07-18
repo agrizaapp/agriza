@@ -57,32 +57,6 @@ apply_page_config()
 apply_global_style()
 init_db()
 
-# Migração de segurança para instalações atualizadas somente pelo GitHub Web.
-# Cria as colunas do Mercado Regional sem apagar cotações já cadastradas.
-for migration_sql in [
-    "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS region VARCHAR(120)",
-    "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS quote_type VARCHAR(30)",
-    "ALTER TABLE quotes ADD COLUMN IF NOT EXISTS source_url TEXT",
-]:
-    try:
-        ex(migration_sql)
-    except Exception:
-        # Em bancos que não aceitam IF NOT EXISTS, tenta criar a coluna
-        # apenas quando a consulta indicar que ela ainda não existe.
-        try:
-            column_name = migration_sql.split("EXISTS", 1)[1].strip().split()[0]
-            existing_columns = q(
-                """SELECT column_name
-                   FROM information_schema.columns
-                   WHERE table_name='quotes' AND column_name=:column""",
-                {"column": column_name},
-            )
-            if not existing_columns:
-                fallback = migration_sql.replace(" IF NOT EXISTS", "")
-                ex(fallback)
-        except Exception:
-            pass
-
 COOKIE_NAME = "agriza_remember_session"
 cookie_manager = stx.CookieManager(key="agriza_cookie_manager")
 
@@ -95,7 +69,7 @@ if "session_cleanup_done" not in st.session_state:
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
-st.caption("Versão ativa: AGRIZA 2.2 Web · compras e vendas guiadas")
+st.caption("Versão ativa: AGRIZA Enterprise 3.0 · base consolidada para Codex")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
@@ -240,6 +214,7 @@ pages = [
     "💰 Vendas",
     "📈 Mercado regional",
     "🤖 AgroIA",
+    "🧪 Teste 7 dias",
 ]
 if user["role"] == "admin":
     pages.extend(["👥 Usuários", "📦 Backup"])
@@ -409,8 +384,16 @@ elif page == "➕ Lançar":
         st.session_state.current_page = "🌾 Safras"
         st.rerun()
 
+    c5, c6 = st.columns(2)
+    if c5.button("📈 Informar cotação", use_container_width=True):
+        st.session_state.current_page = "📈 Mercado regional"
+        st.rerun()
+    if c6.button("📋 Ver contas e pagamentos", use_container_width=True):
+        st.session_state.current_page = "🛒 Compras"
+        st.rerun()
+
     st.info(
-        "O sistema mostra um resumo antes de salvar e faz os cálculos automaticamente."
+        "Escolha o tipo de registro. Em compras e vendas, revise o resumo antes de confirmar."
     )
 
 

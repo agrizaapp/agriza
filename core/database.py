@@ -141,7 +141,10 @@ def init_db():
             price_sc NUMERIC(16,2) NOT NULL,
             source VARCHAR(180),
             quoted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            created_by INTEGER
+            created_by INTEGER,
+            region VARCHAR(120),
+            quote_type VARCHAR(30),
+            source_url TEXT
         )""",
         f"""CREATE TABLE IF NOT EXISTS payments(
             id {id_def},
@@ -175,6 +178,12 @@ def init_db():
     with engine.begin() as conn:
         for statement in ddl:
             conn.execute(text(statement))
+        for statement in [
+            "CREATE INDEX IF NOT EXISTS idx_sales_season ON sales(season_id)",
+            "CREATE INDEX IF NOT EXISTS idx_commitments_due ON commitments(due_date)",
+            "CREATE INDEX IF NOT EXISTS idx_quotes_crop_date ON quotes(crop, quoted_at)",
+        ]:
+            conn.execute(text(statement))
 
     # Migrações para quem já estava usando a versão anterior
     timestamp_column = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP" if IS_POSTGRES else "TIMESTAMP"
@@ -191,6 +200,10 @@ def init_db():
     add_missing_column("commitments", "contract_id", "INTEGER")
     add_missing_column("commitments", "installment_no", "INTEGER")
     add_missing_column("sales", "created_at", timestamp_column)
+    # Mantém os metadados do Mercado Regional compatíveis entre SQLite e PostgreSQL.
+    add_missing_column("quotes", "region", "VARCHAR(120)")
+    add_missing_column("quotes", "quote_type", "VARCHAR(30)")
+    add_missing_column("quotes", "source_url", "TEXT")
 
 
 def log_action(user_id, action, entity, entity_id=None, details=""):
@@ -199,5 +212,3 @@ def log_action(user_id, action, entity, entity_id=None, details=""):
            VALUES(:u,:a,:e,:i,:d)""",
         {"u": user_id, "a": action, "e": entity, "i": entity_id, "d": details},
     )
-
-

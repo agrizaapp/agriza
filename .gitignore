@@ -1,5 +1,11 @@
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
 .env
-agriza_local.db
+*.db
+*.sqlite
+*.sqlite3
+.streamlit/secrets.toml
+.pytest_cache/
+.mypy_cache/
+.DS_Store
