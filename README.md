@@ -1,25 +1,47 @@
-# AGRIZA 2.0
+# AGRIZA Enterprise 3.0
 
-Versão consolidada para substituir o projeto atual sem apagar o PostgreSQL.
+Base consolidada do AGRIZA para continuidade do desenvolvimento no Codex.
 
-## Melhorias
+## Estado desta entrega
 
-- poucos cliques e atalhos na tela inicial;
-- página única `Lançar`;
-- compras, vendas e máquinas com fluxo guiado;
-- confirmação antes de salvar;
-- cálculos automáticos;
-- Mercado Regional de Santo Ângelo;
-- atualização automática inicial pelo Grupo Uggeri;
-- preços manuais da Agrofel, Copermil, Uggeri ou outro comprador;
-- preço regional sugerido na venda, sempre editável;
-- um único arquivo principal chamado `app.py`.
+Esta versão preserva o aplicativo operacional recebido do repositório e organiza o projeto para análise técnica. Ela **não implementa automaticamente todas as melhorias futuras listadas no roadmap**. O objetivo é oferecer ao Codex uma fonte única, documentada e segura para evoluir o sistema sem depender do histórico do chat.
 
-## Publicação
+## Tecnologias
 
-Extraia o ZIP e envie o conteúdo para a raiz do GitHub. Confirme que o arquivo
-principal se chama exatamente `app.py`. Não apague o banco PostgreSQL do Render.
+- Python 3.12
+- Streamlit
+- SQLAlchemy 2
+- PostgreSQL no Render
+- SQLite como fallback local
+- pandas
+- psycopg 3
 
-Após o deploy, o topo deve mostrar:
+## Execução local
 
-`Versão ativa: AGRIZA 2.0 · simples, automático e regional`
+```bash
+python -m venv .venv
+source .venv/bin/activate       # Linux/macOS
+# .venv\\Scripts\\activate      # Windows
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Sem `DATABASE_URL`, o aplicativo cria/usa `agriza_local.db`. Para PostgreSQL, configure a variável de ambiente antes de iniciar.
+
+## Deploy no Render
+
+O arquivo `render.yaml` contém a configuração do serviço. Defina `DATABASE_URL` no painel do Render e não apague o banco existente.
+
+## Documentação para o Codex
+
+Comece por:
+
+1. `CODEX_CONTEXT.md`
+2. `ARCHITECTURE.md`
+3. `ROADMAP.md`
+4. `CHANGELOG.md`
+5. `INSTALL.md`
+
+## Arquivos legados
+
+Versões históricas foram movidas para `legacy/`. Elas servem apenas para consulta e não devem ser importadas pelo aplicativo principal.
