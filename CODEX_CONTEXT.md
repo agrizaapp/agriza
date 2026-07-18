@@ -51,7 +51,6 @@ O aplicativo principal contém páginas para:
 - Vendas
 - AgroIA
 - Mercado regional
-- Teste 7 dias
 - Usuários
 - Backup
 
