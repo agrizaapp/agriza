@@ -11,7 +11,7 @@ import extra_streamlit_components as stx
 from core.config import engine, IS_POSTGRES, apply_page_config, apply_global_style
 from core.database import init_db, q, scalar, ex, insert_id, log_action
 from core.security import hpw, vpw
-from core.utils import money, num
+from core.utils import money, num, br_date
 from services.analytics import season_summary, commitment_status, agroia_recommendation
 from services.auth import (
     setup_complete,
@@ -167,7 +167,7 @@ if "user" not in st.session_state:
                         "O acesso foi realizado, mas não foi possível "
                         "lembrar este dispositivo."
                     )
-                    st.exception(error)
+                    st.caption("Confira os dados e tente novamente.")
 
             st.rerun()
         else:
@@ -214,7 +214,6 @@ pages = [
     "💰 Vendas",
     "📈 Mercado regional",
     "🤖 AgroIA",
-    "🧪 Teste 7 dias",
 ]
 if user["role"] == "admin":
     pages.extend(["👥 Usuários", "📦 Backup"])
@@ -338,7 +337,7 @@ if page == "🏠 Início":
                 st.markdown(
                     f"""<div class="card">
                     <b>{icon} {item['description']}</b><br>
-                    Vence em {item['due_date']} · {money(item['total_value'])}<br>
+                    Vence em {br_date(item['due_date'])} · {money(item['total_value'])}<br>
                     Proteção: {num(status['pct'])}% · Falta {money(status['remaining'])}
                     </div>""",
                     unsafe_allow_html=True,
@@ -360,7 +359,7 @@ if page == "🏠 Início":
         else:
             for item in upcoming:
                 st.write(
-                    f"• **{item['due_date']}** — {item['description']} — {money(item['total_value'])}"
+                    f"• **{br_date(item['due_date'])}** — {item['description']} — {money(item['total_value'])}"
                 )
 
 
@@ -534,6 +533,7 @@ elif page == "🌾 Safras":
                         harvest_date = h1.date_input(
                             "Data do encerramento da colheita",
                             value=item.get("harvest_date") or date.today(),
+                            format="DD/MM/YYYY",
                         )
                         actual_sc = h2.number_input(
                             "Total colhido (sacas)",
@@ -708,6 +708,31 @@ elif page == "🛒 Compras":
             st.error("Informe a descrição e o valor.")
             return False
 
+        duplicate = q(
+            """SELECT id FROM commitments
+               WHERE COALESCE(status,'aberto') != 'cancelado'
+                 AND lower(trim(description)) = lower(trim(:description))
+                 AND COALESCE(lower(trim(supplier)), '') = COALESCE(lower(trim(:supplier)), '')
+                 AND total_value = :value
+                 AND purchase_date = :purchase_date
+                 AND due_date = :due_date
+                 AND season_id = :season_id
+               LIMIT 1""",
+            {
+                "description": description.strip(),
+                "supplier": supplier.strip(),
+                "value": total_value,
+                "purchase_date": purchase_date,
+                "due_date": due_date,
+                "season_id": season_map[selected_season],
+            },
+        )
+        if duplicate:
+            st.warning(
+                "Esta compra já está registrada. Nenhum lançamento duplicado foi salvo."
+            )
+            return False
+
         try:
             commitment_id = insert_id(
                 """INSERT INTO commitments
@@ -742,7 +767,7 @@ elif page == "🛒 Compras":
                 "Não foi possível salvar a compra. "
                 "A sessão continuará aberta para você conferir os dados."
             )
-            st.exception(error)
+            st.caption(f"Detalhe técnico: {error}")
             return False
 
     if CAN_EDIT:
@@ -1098,14 +1123,14 @@ elif page == "🛒 Compras":
                 )
                 st.write(
                     f"**Data da compra:** "
-                    f"{contract.get('purchase_date') or 'Não informada'}"
+                    f"{br_date(contract.get('purchase_date'))}"
                 )
                 for installment in installments:
                     installment_status = commitment_status(installment["id"])
                     mark = "✅" if installment_status["remaining"] <= 0.01 else "◯"
                     st.write(
                         f"{mark} **Parcela {installment.get('installment_no') or '-'}** "
-                        f"— {installment['due_date']} — "
+                        f"— {br_date(installment['due_date'])} — "
                         f"{money(installment['total_value'])} — "
                         f"pagar com **{installment.get('payment_crop') or 'Caixa'}** "
                         f"— falta {money(installment_status['remaining'])}"
@@ -1114,6 +1139,7 @@ elif page == "🛒 Compras":
     commitments = q(
         """SELECT * FROM commitments
            WHERE COALESCE(status,'aberto')!='cancelado'
+             AND contract_id IS NULL
            ORDER BY due_date,id DESC"""
     )
     if not commitments:
@@ -1122,13 +1148,13 @@ elif page == "🛒 Compras":
     for item in commitments:
         status = commitment_status(item["id"])
         icon = "🟢" if status["pct"] >= 99 else "🟡" if status["pct"] >= 50 else "🔴"
-        with st.expander(f"{icon} {item['description']} · {item['due_date']}"):
+        with st.expander(f"{icon} {item['description']} · {br_date(item['due_date'])}"):
             st.write(f"**Valor:** {money(item['total_value'])}")
             st.write(
                 f"**Data da compra:** "
-                f"{item.get('purchase_date') or 'Não informada'}"
+                f"{br_date(item.get('purchase_date'))}"
             )
-            st.write(f"**Vencimento:** {item['due_date'] or 'Não informado'}")
+            st.write(f"**Vencimento:** {br_date(item['due_date'], 'Não informado')}")
             st.write(f"**Fornecedor:** {item['supplier'] or 'Não informado'}")
             st.write(f"**Protegido por vendas:** {money(status['protected'])}")
             st.write(f"**Pago:** {money(status['paid'])}")
@@ -1179,10 +1205,12 @@ elif page == "🛒 Compras":
                         edit_purchase_date = e2.date_input(
                             "Data da compra",
                             value=item.get("purchase_date") or date.today(),
+                            format="DD/MM/YYYY",
                         )
                         edit_due_date = e3.date_input(
                             "Vencimento",
                             value=item.get("due_date") or date.today(),
+                            format="DD/MM/YYYY",
                         )
 
                         edit_payment_crop = st.selectbox(
@@ -1245,7 +1273,7 @@ elif page == "🛒 Compras":
                                 st.success("Compra atualizada com sucesso.")
                             except Exception as error:
                                 st.error("Não foi possível atualizar a compra.")
-                                st.exception(error)
+                                st.caption("Confira os dados e tente novamente.")
 
             if CAN_EDIT and item.get("status", "aberto") == "aberto":
                 with st.form(f"payment_{item['id']}", clear_on_submit=True):
@@ -1257,6 +1285,7 @@ elif page == "🛒 Compras":
                     payment_date = st.date_input(
                         "Data do pagamento",
                         value=date.today(),
+                        format="DD/MM/YYYY",
                         key=f"payment_date_{item['id']}",
                     )
                     note = st.text_input(
@@ -1290,7 +1319,7 @@ elif page == "🛒 Compras":
                         st.success("Pagamento registrado.")
                     except Exception as error:
                         st.error("Não foi possível registrar o pagamento.")
-                        st.exception(error)
+                        st.caption("Confira os dados e tente novamente.")
 
                 if st.button(
                     "Marcar como encerrado",
@@ -1529,6 +1558,26 @@ elif page == "🚜 Máquinas e financiamentos":
 
             if confirm_machine:
                 try:
+                    duplicate_contract = q(
+                        """SELECT id FROM purchase_contracts
+                           WHERE COALESCE(status,'aberto') != 'cancelado'
+                             AND lower(trim(description)) = lower(trim(:description))
+                             AND COALESCE(lower(trim(supplier)), '') = COALESCE(lower(trim(:supplier)), '')
+                             AND total_value = :value
+                             AND purchase_date = :purchase_date
+                           LIMIT 1""",
+                        {
+                            "description": d["machine_name"],
+                            "supplier": d["supplier"],
+                            "value": d["total_value"],
+                            "purchase_date": d["purchase_date"],
+                        },
+                    )
+                    if duplicate_contract:
+                        st.warning(
+                            "Este contrato de máquina já está registrado. Nada foi salvo."
+                        )
+                        st.stop()
                     contract_id = insert_id(
                         """INSERT INTO purchase_contracts
                            (description,supplier,category,total_value,
@@ -1579,7 +1628,7 @@ elif page == "🚜 Máquinas e financiamentos":
                     st.rerun()
                 except Exception as error:
                     st.error("Não foi possível salvar a máquina e as parcelas.")
-                    st.exception(error)
+                    st.caption(f"Detalhe técnico: {error}")
 
     with tab_list:
         machines = q(
@@ -1644,7 +1693,7 @@ elif page == "💰 Vendas":
         )
         commitment_map = {"Venda livre": None}
         commitment_map.update(
-            {f"{c['description']} · {c['due_date']}": c["id"] for c in commitments}
+            {f"{c['description']} · {br_date(c['due_date'])}": c["id"] for c in commitments}
         )
 
         def save_sale_record(
@@ -1700,7 +1749,7 @@ elif page == "💰 Vendas":
                 return True
             except Exception as error:
                 st.error("Não foi possível salvar a venda.")
-                st.exception(error)
+                st.caption("Confira os dados e tente novamente.")
                 return False
 
         if CAN_EDIT:
@@ -1991,7 +2040,7 @@ elif page == "💰 Vendas":
             f"""<div class="card">
             <b>{num(item['quantity_sc'], 0)} sc · {money(item['price_sc'])}/sc</b><br>
             {item['season_name']} · {item['crop']}<br>
-            {item['buyer'] or 'Comprador não informado'} · {item['sale_date']}
+            {item['buyer'] or 'Comprador não informado'} · {br_date(item['sale_date'])}
             </div>""",
             unsafe_allow_html=True,
         )
@@ -2117,13 +2166,13 @@ elif page == "🤖 AgroIA":
             )
 
 elif page == "📈 Mercado regional":
-    st.subheader("Mercado regional · Santo Ângelo")
+    st.subheader("Cotações de preços · Mercado regional")
     st.caption(
-        "Referências de Soja, Milho, Trigo e Canola. "
-        "O valor sugerido pode ser alterado manualmente."
+        "Compare referências de Soja, Milho, Trigo e Canola por praça e fonte. "
+        "Use a cotação que melhor representa sua negociação."
     )
 
-    if st.button("🔄 Atualizar preços agora", use_container_width=True, type="primary"):
+    if st.button("🔄 Consultar Grupo Uggeri", use_container_width=True, type="primary"):
         with st.spinner("Buscando cotações regionais..."):
             result = update_regional_quotes(user["id"])
         if result["updated"]:
@@ -2133,9 +2182,8 @@ elif page == "📈 Mercado regional":
         st.rerun()
 
     st.info(
-        "Fonte automática inicial: Grupo Uggeri. "
-        "Agrofel e Copermil podem ser informadas manualmente quando o preço "
-        "não estiver publicado em formato automático."
+        "Consulta automática disponível: Grupo Uggeri. Você também pode registrar "
+        "preços de cooperativas, tradings, compradores locais e indicadores de mercado."
     )
 
     latest = q(
@@ -2153,7 +2201,7 @@ elif page == "📈 Mercado regional":
         if item:
             cols[index].metric(crop_name, money(item["price_sc"]) + "/sc")
             cols[index].caption(
-                f"{item.get('source') or 'Fonte não informada'}"
+                f"{item.get('source') or 'Fonte não informada'} · {br_date(item.get('quoted_at'))}"
             )
         else:
             cols[index].metric(crop_name, "Sem cotação")
@@ -2165,7 +2213,16 @@ elif page == "📈 Mercado regional":
                 price = st.number_input("Preço (R$/sc)", min_value=0.0, step=0.50)
                 source = st.selectbox(
                     "Fonte",
-                    ["Agrofel", "Copermil", "Grupo Uggeri", "Outro comprador"],
+                    [
+                        "Grupo Uggeri",
+                        "Agrofel",
+                        "Copermil",
+                        "Cooperativa local",
+                        "Trading / exportadora",
+                        "Comprador local",
+                        "Indicador CEPEA/ESALQ",
+                        "Outro",
+                    ],
                 )
                 region = st.text_input("Praça/região", value="Santo Ângelo/RS")
                 save_quote = st.form_submit_button(
@@ -2201,73 +2258,19 @@ elif page == "📈 Mercado regional":
     )
     if history:
         st.markdown("### Histórico recente")
-        st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
-
-
-elif page == "🧪 Teste 7 dias":
-    st.subheader("Roteiro do piloto")
-    st.info(
-        "Durante uma semana, use dados reais em pequenas quantidades. "
-        "Não cadastre tudo de uma vez; primeiro valide o fluxo."
-    )
-
-    checklist = [
-        "Dia 1 — cadastrar uma safra real e conferir produção estimada.",
-        "Dia 2 — cadastrar duas compras ou compromissos.",
-        "Dia 3 — registrar uma cotação e verificar a recomendação AgroIA.",
-        "Dia 4 — registrar uma venda e vinculá-la a um compromisso.",
-        "Dia 5 — registrar um pagamento e conferir a proteção.",
-        "Dia 6 — testar no celular com outro usuário da família.",
-        "Dia 7 — exportar o backup e registrar a avaliação final.",
-    ]
-    for item in checklist:
-        st.write("☐", item)
-
-    st.markdown("### Registrar observação")
-    with st.form("feedback", clear_on_submit=True):
-        module = st.selectbox(
-            "Módulo",
-            ["Painel", "Safras", "Compras", "Vendas", "Mercado", "Usuários", "Celular", "Outro"],
+        history_frame = pd.DataFrame(history)
+        history_frame["quoted_at"] = history_frame["quoted_at"].map(br_date)
+        history_frame = history_frame.rename(
+            columns={
+                "crop": "Produto",
+                "price_sc": "Preço (R$/sc)",
+                "source": "Fonte",
+                "region": "Praça/região",
+                "quote_type": "Tipo",
+                "quoted_at": "Data",
+            }
         )
-        feedback_type = st.selectbox(
-            "Tipo",
-            ["Ideia", "Dificuldade", "Erro", "Informação faltando", "Elogio"],
-        )
-        priority = st.selectbox("Prioridade", ["Baixa", "Média", "Alta"])
-        description = st.text_area("Descreva o que aconteceu")
-        submit = st.form_submit_button("Salvar observação", use_container_width=True)
-
-    if submit:
-        if not description.strip():
-            st.error("Descreva a observação.")
-        else:
-            feedback_id = insert_id(
-                """INSERT INTO pilot_feedback
-                   (user_id,module,feedback_type,priority,description)
-                   VALUES(:u,:m,:t,:p,:d)""",
-                {
-                    "u": user["id"],
-                    "m": module,
-                    "t": feedback_type,
-                    "p": priority,
-                    "d": description.strip(),
-                },
-            )
-            log_action(user["id"], "registrou", "feedback", feedback_id, module)
-            st.success("Observação salva.")
-            st.rerun()
-
-    feedback = q(
-        """SELECT pilot_feedback.created_at,users.name,pilot_feedback.module,
-                  pilot_feedback.feedback_type,pilot_feedback.priority,
-                  pilot_feedback.description
-           FROM pilot_feedback
-           LEFT JOIN users ON users.id=pilot_feedback.user_id
-           ORDER BY pilot_feedback.id DESC"""
-    )
-    if feedback:
-        st.markdown("### Observações registradas")
-        st.dataframe(pd.DataFrame(feedback), use_container_width=True, hide_index=True)
+        st.dataframe(history_frame, use_container_width=True, hide_index=True)
 
 
 elif page == "👥 Usuários":
@@ -2340,7 +2343,7 @@ elif page == "👥 Usuários":
 elif page == "📦 Backup":
     st.subheader("Backup e conferência")
     st.caption(
-        "Baixe este arquivo ao final de cada dia do piloto. "
+        "Baixe este arquivo sempre que quiser guardar uma cópia dos seus dados. "
         "Ele contém cópias em CSV das principais tabelas."
     )
 
@@ -2366,12 +2369,12 @@ elif page == "📦 Backup":
         metadata = {
             "generated_at": datetime.now().isoformat(),
             "database": engine.dialect.name,
-            "version": "piloto-7-dias",
+            "version": "agriza-enterprise-3.0",
         }
         archive.writestr("metadata.json", json.dumps(metadata, indent=2, ensure_ascii=False))
 
     st.download_button(
-        "Baixar backup do piloto",
+        "Baixar backup",
         data=buffer.getvalue(),
         file_name=f"agriza_backup_{date.today().isoformat()}.zip",
         mime="application/zip",
