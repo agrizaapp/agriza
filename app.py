@@ -2114,15 +2114,22 @@ elif page == "🤖 AgroIA":
 
     st.markdown("### Necessidade por cultura")
     if by_crop:
+        crop_rows = []
+        for crop, value in sorted(by_crop.items(), key=lambda item: item[1], reverse=True):
+            quote = latest_quote_for_crop(crop) if crop in PAYMENT_OPTIONS else None
+            price_per_sc = float(quote["price_sc"]) if quote else 0.0
+            crop_rows.append(
+                {
+                    "Cultura/Fonte": crop,
+                    "Valor necessário": value,
+                    "Cotação usada": money(price_per_sc) + "/sc" if price_per_sc else "Informe a cotação",
+                    "Sacas necessárias": (
+                        f"{num(value / price_per_sc, 0)} sc" if price_per_sc else "—"
+                    ),
+                }
+            )
         crop_df = pd.DataFrame(
-            [
-                {"Cultura/Fonte": crop, "Valor necessário": value}
-                for crop, value in sorted(
-                    by_crop.items(),
-                    key=lambda item: item[1],
-                    reverse=True,
-                )
-            ]
+            crop_rows
         )
         st.dataframe(
             crop_df,
@@ -2132,8 +2139,13 @@ elif page == "🤖 AgroIA":
                 "Valor necessário": st.column_config.NumberColumn(
                     "Valor necessário",
                     format="R$ %.2f",
-                )
+                ),
+                "Cotação usada": st.column_config.TextColumn("Cotação usada"),
+                "Sacas necessárias": st.column_config.TextColumn("Sacas necessárias"),
             },
+        )
+        st.caption(
+            "As sacas são estimadas pela cotação mais recente cadastrada para cada cultura."
         )
 
     st.markdown("### Pergunta rápida")
