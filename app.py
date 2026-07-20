@@ -55,17 +55,22 @@ def confirmation_card(title, rows, total_label=None, total_value=None, warnings=
 
 apply_page_config()
 apply_global_style()
-init_db()
 
-COOKIE_NAME = "agriza_remember_session"
-cookie_manager = stx.CookieManager(key="agriza_cookie_manager")
 
-if "session_cleanup_done" not in st.session_state:
+@st.cache_resource
+def initialize_database():
+    """Executa esquema e limpeza uma vez por processo, não a cada navegação."""
+    init_db()
     try:
         cleanup_expired_sessions()
     except Exception:
         pass
-    st.session_state.session_cleanup_done = True
+
+
+initialize_database()
+
+COOKIE_NAME = "agriza_remember_session"
+cookie_manager = stx.CookieManager(key="agriza_cookie_manager")
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
@@ -1703,6 +1708,7 @@ elif page == "💰 Vendas":
             buyer,
             objective,
             sale_date,
+            payment_date,
             notes,
         ):
             if quantity <= 0 or price <= 0:
@@ -1723,12 +1729,13 @@ elif page == "💰 Vendas":
             try:
                 sale_id = insert_id(
                     """INSERT INTO sales
-                       (season_id,sale_date,quantity_sc,price_sc,buyer,
+                       (season_id,sale_date,payment_date,quantity_sc,price_sc,buyer,
                         commitment_id,notes,created_by)
-                       VALUES(:s,:d,:q,:p,:b,:c,:n,:u)""",
+                       VALUES(:s,:d,:pay,:q,:p,:b,:c,:n,:u)""",
                     {
                         "s": season_id,
                         "d": sale_date,
+                        "pay": payment_date,
                         "q": quantity,
                         "p": price,
                         "b": buyer.strip(),
@@ -1823,6 +1830,12 @@ elif page == "💰 Vendas":
                         format="DD/MM/YYYY",
                         key="sale_date_v22",
                     )
+                    payment_date = st.date_input(
+                        "Data prevista do pagamento",
+                        value=sale_date,
+                        format="DD/MM/YYYY",
+                        key="sale_payment_date_v22",
+                    )
                     notes = st.text_area(
                         "Observação (opcional)",
                         key="sale_notes_v22",
@@ -1851,6 +1864,7 @@ elif page == "💰 Vendas":
                             "buyer": buyer.strip(),
                             "objective": objective,
                             "sale_date": sale_date,
+                            "payment_date": payment_date,
                             "notes": notes.strip(),
                             "balance_before": float(selected_summary["balance"]),
                             "crop": selected_row["crop"],
@@ -1917,6 +1931,11 @@ elif page == "💰 Vendas":
                             value=voice_sale_draft.get("sale_date", date.today()),
                             format="DD/MM/YYYY",
                         )
+                        v_payment_date = st.date_input(
+                            "Data prevista do pagamento",
+                            value=v_date,
+                            format="DD/MM/YYYY",
+                        )
                         v_notes = st.text_area(
                             "Observação",
                             value=voice_sale_draft.get("notes", ""),
@@ -1945,6 +1964,7 @@ elif page == "💰 Vendas":
                                 "buyer": v_buyer.strip(),
                                 "objective": v_objective,
                                 "sale_date": v_date,
+                                "payment_date": v_payment_date,
                                 "notes": v_notes.strip(),
                                 "balance_before": float(current_summary["balance"]),
                                 "crop": season_row["crop"],
@@ -1968,6 +1988,7 @@ elif page == "💰 Vendas":
                         ("Preço por saca", money(d["price"])),
                         ("Comprador", d["buyer"] or "Não informado"),
                         ("Data", d["sale_date"].strftime("%d/%m/%Y")),
+                        ("Pagamento previsto", d["payment_date"].strftime("%d/%m/%Y")),
                         ("Vinculação", d["objective"]),
                         ("Saldo após a venda", f"{num(balance_after, 0)} sc"),
                     ],
@@ -2020,6 +2041,7 @@ elif page == "💰 Vendas":
                         d["buyer"],
                         d["objective"],
                         d["sale_date"],
+                        d["payment_date"],
                         d["notes"],
                     ):
                         st.session_state.pop("sale_review_v22", None)
@@ -2040,7 +2062,8 @@ elif page == "💰 Vendas":
             f"""<div class="card">
             <b>{num(item['quantity_sc'], 0)} sc · {money(item['price_sc'])}/sc</b><br>
             {item['season_name']} · {item['crop']}<br>
-            {item['buyer'] or 'Comprador não informado'} · {br_date(item['sale_date'])}
+            {item['buyer'] or 'Comprador não informado'} · venda {br_date(item['sale_date'])}
+            · pagamento {br_date(item.get('payment_date'), 'não informado')}
             </div>""",
             unsafe_allow_html=True,
         )

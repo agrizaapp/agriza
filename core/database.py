@@ -127,6 +127,7 @@ def init_db():
             id {id_def},
             season_id INTEGER NOT NULL,
             sale_date DATE NOT NULL,
+            payment_date DATE,
             quantity_sc NUMERIC(16,2) NOT NULL,
             price_sc NUMERIC(16,2) NOT NULL,
             buyer VARCHAR(180),
@@ -200,6 +201,7 @@ def init_db():
     add_missing_column("commitments", "contract_id", "INTEGER")
     add_missing_column("commitments", "installment_no", "INTEGER")
     add_missing_column("sales", "created_at", timestamp_column)
+    add_missing_column("sales", "payment_date", "DATE")
     # Mantém os metadados do Mercado Regional compatíveis entre SQLite e PostgreSQL.
     add_missing_column("quotes", "region", "VARCHAR(120)")
     add_missing_column("quotes", "quote_type", "VARCHAR(30)")
