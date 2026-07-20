@@ -439,30 +439,20 @@ elif page == "📝 Lançar / Visualizar":
     st.caption("Escolha uma área. Em cada tela você pode registrar e consultar seus lançamentos.")
 
     c1, c2 = st.columns(2)
-    if c1.button("🛒 Nova compra", use_container_width=True, type="primary"):
+    if c1.button("🛒 Compras", use_container_width=True, type="primary"):
         st.session_state.purchase_show_history = False
         st.session_state.current_page = "🛒 Compras"
         st.rerun()
-    if c2.button("💰 Nova venda", use_container_width=True, type="primary"):
+    if c2.button("💰 Vendas", use_container_width=True, type="primary"):
         st.session_state.sale_show_history = False
         st.session_state.current_page = "💰 Vendas"
         st.rerun()
 
     c3, c4 = st.columns(2)
-    if c3.button("📚 Histórico de compras", use_container_width=True):
-        st.session_state.purchase_show_history = True
-        st.session_state.current_page = "🛒 Compras"
-        st.rerun()
-    if c4.button("📚 Histórico de vendas", use_container_width=True):
-        st.session_state.sale_show_history = True
-        st.session_state.current_page = "💰 Vendas"
-        st.rerun()
-
-    c5, c6 = st.columns(2)
-    if c5.button("🌾 Nova safra", use_container_width=True):
+    if c3.button("🌾 Nova safra", use_container_width=True):
         st.session_state.current_page = "🌾 Safras"
         st.rerun()
-    if c6.button("📈 Cotações", use_container_width=True):
+    if c4.button("📈 Cotações", use_container_width=True):
         st.session_state.current_page = "📈 Mercado regional"
         st.rerun()
 
@@ -1000,6 +990,9 @@ elif page == "🛒 Compras":
             st.caption(f"Detalhe técnico: {error}")
             return False
 
+    if st.session_state.pop("reset_purchase_type_after_redirect", False):
+        st.session_state.pop("purchase_type_v22", None)
+
     if CAN_EDIT and not show_purchase_history:
         st.markdown("### Nova compra")
         st.caption(
@@ -1019,18 +1012,9 @@ elif page == "🛒 Compras":
         )
 
         if purchase_type in ("📑 Parcelada / contrato", "🚜 Máquina ou financiamento"):
-            st.info(
-                "Compras parceladas, contratos e máquinas ficam em uma tela própria "
-                "para não misturar com compras comuns."
-            )
-            if st.button(
-                "Abrir Máquinas e financiamentos",
-                use_container_width=True,
-                type="primary",
-                key="go_machine_financing_v22",
-            ):
-                st.session_state.current_page = "🚜 Máquinas e financiamentos"
-                st.rerun()
+            st.session_state.reset_purchase_type_after_redirect = True
+            st.session_state.current_page = "🚜 Máquinas e financiamentos"
+            st.rerun()
         else:
             is_cash = purchase_type == "🛒 À vista"
 
