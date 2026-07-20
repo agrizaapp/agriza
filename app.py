@@ -182,24 +182,7 @@ if "user" not in st.session_state:
 user = st.session_state.user
 CAN_EDIT = user["role"] in ("admin", "operador")
 
-top_left, top_right = st.columns([4, 1])
-top_left.caption(f"Olá, **{user['name']}** · {user['role'].capitalize()}")
-if top_right.button("Sair", use_container_width=True):
-    active_token = (
-        st.session_state.get("persistent_token")
-        or cookie_manager.get(COOKIE_NAME)
-    )
-    try:
-        revoke_persistent_session(active_token)
-    except Exception:
-        pass
-    try:
-        cookie_manager.delete(COOKIE_NAME)
-    except Exception:
-        pass
-    st.session_state.pop("persistent_token", None)
-    st.session_state.pop("user", None)
-    st.rerun()
+st.caption(f"Olá, **{user['name']}** · {user['role'].capitalize()}")
 
 PAYMENT_OPTIONS = [
     "Soja",
@@ -210,18 +193,23 @@ PAYMENT_OPTIONS = [
     "Mais de uma",
 ]
 
-pages = [
+menu_pages = [
     "🏠 Início",
     "➕ Lançar",
+    "👁️ Visualizar",
+    "🤖 AgroIA",
+]
+view_pages = [
     "🌾 Safras",
     "🛒 Compras",
     "🚜 Máquinas e financiamentos",
     "💰 Vendas",
     "📈 Mercado regional",
-    "🤖 AgroIA",
 ]
+pages = menu_pages + view_pages
 if user["role"] == "admin":
-    pages.extend(["👥 Usuários", "📦 Backup"])
+    menu_pages.append("📦 Reserva")
+    pages.extend(["👥 Usuários", "📦 Reserva"])
 
 if "current_page" not in st.session_state or st.session_state.current_page not in pages:
     st.session_state.current_page = pages[0]
@@ -232,9 +220,9 @@ with st.expander(
 ):
     st.caption("Toque em uma área para abrir.")
     with st.container(key="main_menu_grid"):
-        for start in range(0, len(pages), 2):
+        for start in range(0, len(menu_pages), 2):
             cols = st.columns(2, gap="small")
-            for offset, label in enumerate(pages[start:start + 2]):
+            for offset, label in enumerate(menu_pages[start:start + 2]):
                 with cols[offset]:
                     button_type = "primary" if label == st.session_state.current_page else "secondary"
                     if st.button(
@@ -253,19 +241,7 @@ page = st.session_state.current_page
 # PÁGINAS
 # =========================================================
 if page == "🏠 Início":
-    st.subheader("Hoje na propriedade")
-
-    a1, a2, a3 = st.columns(3)
-    if a1.button("➕ Lançar", use_container_width=True, type="primary"):
-        st.session_state.current_page = "➕ Lançar"
-        st.rerun()
-    if a2.button("📈 Ver preços", use_container_width=True):
-        st.session_state.current_page = "📈 Mercado regional"
-        st.rerun()
-    if a3.button("🤖 AgroIA", use_container_width=True):
-        st.session_state.current_page = "🤖 AgroIA"
-        st.rerun()
-
+    st.subheader("Visão geral")
     st.markdown("### Resumo da gestão")
     seasons = q("SELECT * FROM seasons WHERE active=TRUE ORDER BY id DESC")
 
@@ -301,12 +277,43 @@ if page == "🏠 Início":
         c2.metric("Já vendido", f"{num(summary['sold_pct'])}%")
         c3.metric("Saldo livre", f"{num(summary['balance'], 0)} sc")
 
+        i1, i2, i3 = st.columns(3)
+        if i1.button("ℹ️ Produção", key="info_production"):
+            st.info(
+                "Produção estimada = área da safra × produtividade prevista. "
+                "Quando a colheita é informada, o indicador passa a usar a produção colhida."
+            )
+        if i2.button("ℹ️ Vendas", key="info_sold"):
+            st.session_state.current_page = "💰 Vendas"
+            st.rerun()
+        if i3.button("ℹ️ Saldo", key="info_balance"):
+            st.info(
+                "Saldo livre = produção da safra − quantidade das vendas de grãos registradas."
+            )
+
         c4, c5, c6 = st.columns(3)
         c4.metric("Custo por saca", money(summary["cost_per_sc"]))
         c5.metric("Preço médio vendido", money(summary["average"]))
         c6.metric("Preço necessário", money(summary["required_price"]))
 
-        rec = agroia_recommendation(season)
+        i4, i5, i6 = st.columns(3)
+        if i4.button("ℹ️ Custo", key="info_cost"):
+            st.info("Custo por saca = custo total da safra ÷ produção considerada.")
+        if i5.button("ℹ️ Ver vendas", key="info_average"):
+            st.session_state.current_page = "💰 Vendas"
+            st.rerun()
+        if i6.button("ℹ️ Preço", key="info_required"):
+            st.info(
+                "Preço necessário = valor que falta para atingir a margem cadastrada ÷ saldo livre."
+            )
+
+        recommendation_key = f"agroia_recommendation_{season['id']}"
+        if recommendation_key not in st.session_state:
+            st.session_state[recommendation_key] = agroia_recommendation(season)
+        if st.button("✨ Gerar recomendação", key=f"generate_{season['id']}"):
+            st.session_state[recommendation_key] = agroia_recommendation(season)
+            st.session_state[f"recommendation_generated_{season['id']}"] = datetime.now()
+        rec = st.session_state[recommendation_key]
         st.markdown(
             f"""<div class="card {rec['level']}">
             <small>RECOMENDAÇÃO AGROIA</small>
@@ -367,6 +374,27 @@ if page == "🏠 Início":
                 st.write(
                     f"• **{br_date(item['due_date'])}** — {item['description']} — {money(item['total_value'])}"
                 )
+
+
+elif page == "👁️ Visualizar":
+    st.subheader("O que você quer visualizar?")
+    st.caption("Escolha uma área para consultar lançamentos, indicadores e histórico.")
+    view_options = [
+        ("🌾 Safras", "🌾 Safras"),
+        ("🛒 Compras", "🛒 Compras"),
+        ("💰 Vendas", "💰 Vendas"),
+        ("🚜 Máquinas", "🚜 Máquinas e financiamentos"),
+        ("📈 Mercado", "📈 Mercado regional"),
+    ]
+    if user["role"] == "admin":
+        view_options.append(("👥 Usuários", "👥 Usuários"))
+    for start in range(0, len(view_options), 2):
+        cols = st.columns(2)
+        for offset, (label, destination) in enumerate(view_options[start:start + 2]):
+            with cols[offset]:
+                if st.button(label, key=f"view_{destination}", use_container_width=True):
+                    st.session_state.current_page = destination
+                    st.rerun()
 
 
 elif page == "➕ Lançar":
@@ -1426,6 +1454,34 @@ elif page == "🚜 Máquinas e financiamentos":
                 step=1,
             )
 
+            finance_table = st.selectbox(
+                "Tabela de financiamento",
+                ["Manual", "SAC", "Price", "Americana"],
+                help=(
+                    "Manual mantém as parcelas preenchidas por você. As demais opções "
+                    "calculam automaticamente as parcelas a partir do valor e dos juros."
+                ),
+            )
+            interest_rate = 0.0
+            first_due_date = date.today()
+            interval_months = 1
+            if finance_table != "Manual":
+                f1, f2, f3 = st.columns(3)
+                interest_rate = f1.number_input(
+                    "Juros por parcela (%)",
+                    min_value=0.0,
+                    value=1.0,
+                    step=0.1,
+                )
+                first_due_date = f2.date_input(
+                    "Primeiro vencimento",
+                    value=date.today() + timedelta(days=30),
+                    format="DD/MM/YYYY",
+                )
+                interval_months = f3.number_input(
+                    "Intervalo (meses)", min_value=1, max_value=24, value=1
+                )
+
             example_dates = [
                 date(2026, 11, 20),
                 date(2027, 5, 20),
@@ -1436,52 +1492,69 @@ elif page == "🚜 Máquinas e financiamentos":
             example_crops = ["Trigo", "Soja", "Soja", "Soja"]
 
             rows = []
-            for index in range(int(installment_count)):
-                st.markdown(f"#### Parcela {index + 1}")
-                p1, p2, p3 = st.columns(3)
+            if finance_table == "Manual":
+                for index in range(int(installment_count)):
+                    st.markdown(f"#### Parcela {index + 1}")
+                    p1, p2, p3 = st.columns(3)
 
-                if use_planter and index < 4:
-                    due_default = example_dates[index]
-                    value_default = example_values[index]
-                    crop_default = example_crops[index]
-                else:
-                    due_default = date.today()
-                    value_default = 0.0
-                    crop_default = "Caixa"
+                    if use_planter and index < 4:
+                        due_default = example_dates[index]
+                        value_default = example_values[index]
+                        crop_default = example_crops[index]
+                    else:
+                        due_default = date.today()
+                        value_default = 0.0
+                        crop_default = "Caixa"
 
-                due_date_value = p1.date_input(
-                    "Vencimento",
-                    value=due_default,
-                    format="DD/MM/YYYY",
-                    key=f"machine_due_v102_{index}",
+                    due_date_value = p1.date_input(
+                        "Vencimento", value=due_default, format="DD/MM/YYYY",
+                        key=f"machine_due_v102_{index}",
+                    )
+                    installment_value = p2.number_input(
+                        "Valor da parcela (R$)", min_value=0.0,
+                        value=value_default, step=1000.0,
+                        key=f"machine_value_v102_{index}",
+                    )
+                    payment_crop_value = p3.selectbox(
+                        "Será paga com", payment_options,
+                        index=payment_options.index(crop_default) if crop_default in payment_options else 0,
+                        key=f"machine_crop_v102_{index}",
+                    )
+                    rows.append({"number": index + 1, "due_date": due_date_value,
+                                 "value": installment_value, "crop": payment_crop_value})
+            else:
+                balance = float(total_value)
+                rate = float(interest_rate) / 100
+                count = int(installment_count)
+                fixed_payment = (
+                    balance * rate / (1 - (1 + rate) ** -count)
+                    if finance_table == "Price" and rate > 0 else balance / count
                 )
-                installment_value = p2.number_input(
-                    "Valor da parcela (R$)",
-                    min_value=0.0,
-                    value=value_default,
-                    step=1000.0,
-                    key=f"machine_value_v102_{index}",
-                )
-                crop_index = (
-                    payment_options.index(crop_default)
-                    if crop_default in payment_options
-                    else 0
-                )
-                payment_crop_value = p3.selectbox(
-                    "Será paga com",
-                    payment_options,
-                    index=crop_index,
-                    key=f"machine_crop_v102_{index}",
-                )
-
-                rows.append(
-                    {
-                        "number": index + 1,
-                        "due_date": due_date_value,
-                        "value": installment_value,
-                        "crop": payment_crop_value,
-                    }
-                )
+                schedule_preview = []
+                for index in range(count):
+                    interest = balance * rate
+                    if finance_table == "SAC":
+                        amortization = float(total_value) / count
+                        installment_value = amortization + interest
+                    elif finance_table == "Americana":
+                        amortization = balance if index == count - 1 else 0
+                        installment_value = interest + amortization
+                    else:  # Price
+                        installment_value = fixed_payment
+                        amortization = installment_value - interest
+                    amortization = min(amortization, balance)
+                    balance = max(balance - amortization, 0)
+                    due_date_value = first_due_date + timedelta(days=30 * int(interval_months) * index)
+                    rows.append({"number": index + 1, "due_date": due_date_value,
+                                 "value": round(installment_value, 2), "crop": "Caixa"})
+                    schedule_preview.append({
+                        "Parcela": index + 1,
+                        "Vencimento": br_date(due_date_value),
+                        "Amortização": money(amortization),
+                        "Juros": money(interest),
+                        "Valor": money(installment_value),
+                    })
+                st.dataframe(pd.DataFrame(schedule_preview), use_container_width=True, hide_index=True)
 
             submitted = st.form_submit_button(
                 "✅ Salvar máquina e parcelas",
@@ -1498,7 +1571,7 @@ elif page == "🚜 Máquinas e financiamentos":
                 st.error("Informe o valor total da compra.")
             elif len(valid_rows) != int(installment_count):
                 st.error("Preencha o valor de todas as parcelas.")
-            elif abs(installment_sum - total_value) > 0.01:
+            elif finance_table == "Manual" and abs(installment_sum - total_value) > 0.01:
                 st.error(
                     f"A soma das parcelas é {money(installment_sum)}, "
                     f"mas o valor total da compra é {money(total_value)}."
@@ -1512,7 +1585,10 @@ elif page == "🚜 Máquinas e financiamentos":
                     "year": int(machine_year),
                     "purchase_date": purchase_date,
                     "total_value": float(total_value),
-                    "notes": notes.strip(),
+                    "notes": (
+                        notes.strip()
+                        + (f" · Tabela: {finance_table}" if finance_table != "Manual" else "")
+                    ).strip(" ·"),
                     "rows": valid_rows,
                 }
 
@@ -2059,15 +2135,56 @@ elif page == "💰 Vendas":
     if not sales:
         st.caption("Nenhuma venda registrada.")
     for item in sales:
-        st.markdown(
-            f"""<div class="card">
-            <b>{num(item['quantity_sc'], 0)} sc · {money(item['price_sc'])}/sc</b><br>
-            {item['season_name']} · {item['crop']}<br>
-            {item['buyer'] or 'Comprador não informado'} · venda {br_date(item['sale_date'])}
-            · pagamento {br_date(item.get('payment_date'), 'não informado')}
-            </div>""",
-            unsafe_allow_html=True,
-        )
+        with st.expander(
+            f"{item['season_name']} · {num(item['quantity_sc'], 0)} sc · {br_date(item['sale_date'])}"
+        ):
+            st.write(f"**Preço:** {money(item['price_sc'])}/sc")
+            st.write(f"**Comprador:** {item['buyer'] or 'Não informado'}")
+            st.write(f"**Pagamento previsto:** {br_date(item.get('payment_date'), 'Não informado')}")
+            st.write(f"**Observação:** {item.get('notes') or '—'}")
+            a1, a2, a3 = st.columns(3)
+            if a1.button("👁️ Visualizar", key=f"view_sale_{item['id']}"):
+                st.info(
+                    f"Total da venda: {money(float(item['quantity_sc']) * float(item['price_sc']))}."
+                )
+            if CAN_EDIT and a2.button("✏️ Editar", key=f"edit_sale_{item['id']}"):
+                st.session_state[f"editing_sale_{item['id']}"] = True
+            if CAN_EDIT and a3.button("🗑️ Excluir", key=f"delete_sale_{item['id']}"):
+                st.session_state[f"confirm_delete_sale_{item['id']}"] = True
+
+            if st.session_state.get(f"editing_sale_{item['id']}"):
+                with st.form(f"sale_edit_form_{item['id']}"):
+                    e1, e2 = st.columns(2)
+                    edit_price = e1.number_input("Preço por saca (R$)", min_value=0.0, value=float(item['price_sc']))
+                    edit_buyer = e2.text_input("Comprador", value=item.get("buyer") or "")
+                    e3, e4 = st.columns(2)
+                    edit_sale_date = e3.date_input("Data da venda", value=item['sale_date'], format="DD/MM/YYYY")
+                    edit_payment_date = e4.date_input("Data prevista do pagamento", value=item.get("payment_date") or item['sale_date'], format="DD/MM/YYYY")
+                    edit_notes = st.text_area("Observação", value=item.get("notes") or "")
+                    save_sale_edit = st.form_submit_button("Salvar alterações")
+                if save_sale_edit:
+                    ex(
+                        """UPDATE sales SET price_sc=:p,buyer=:b,sale_date=:d,
+                           payment_date=:pd,notes=:n WHERE id=:id""",
+                        {"p": edit_price, "b": edit_buyer.strip(), "d": edit_sale_date,
+                         "pd": edit_payment_date, "n": edit_notes.strip(), "id": item["id"]},
+                    )
+                    log_action(user["id"], "editou", "venda", item["id"], item["season_name"])
+                    st.session_state.pop(f"editing_sale_{item['id']}", None)
+                    st.success("Venda atualizada.")
+                    st.rerun()
+
+            if st.session_state.get(f"confirm_delete_sale_{item['id']}"):
+                st.warning("Excluir esta venda removerá sua proteção vinculada a compromissos.")
+                d1, d2 = st.columns(2)
+                if d1.button("Confirmar exclusão", key=f"confirm_sale_delete_{item['id']}"):
+                    ex("DELETE FROM sales WHERE id=:id", {"id": item["id"]})
+                    log_action(user["id"], "excluiu", "venda", item["id"], item["season_name"])
+                    st.success("Venda excluída.")
+                    st.rerun()
+                if d2.button("Cancelar", key=f"cancel_sale_delete_{item['id']}"):
+                    st.session_state.pop(f"confirm_delete_sale_{item['id']}", None)
+                    st.rerun()
 
 
 elif page == "🤖 AgroIA":
@@ -2376,7 +2493,7 @@ elif page == "👥 Usuários":
                 st.rerun()
 
 
-elif page == "📦 Backup":
+elif page == "📦 Reserva":
     st.subheader("Backup e conferência")
     st.caption(
         "Baixe este arquivo sempre que quiser guardar uma cópia dos seus dados. "
@@ -2427,3 +2544,23 @@ elif page == "📦 Backup":
     )
     if logs:
         st.dataframe(pd.DataFrame(logs), use_container_width=True, hide_index=True)
+
+
+st.markdown("---")
+_, exit_column = st.columns([4, 1])
+if exit_column.button("Sair", key="logout_footer", use_container_width=True):
+    active_token = (
+        st.session_state.get("persistent_token")
+        or cookie_manager.get(COOKIE_NAME)
+    )
+    try:
+        revoke_persistent_session(active_token)
+    except Exception:
+        pass
+    try:
+        cookie_manager.delete(COOKIE_NAME)
+    except Exception:
+        pass
+    st.session_state.pop("persistent_token", None)
+    st.session_state.pop("user", None)
+    st.rerun()

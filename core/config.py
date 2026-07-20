@@ -32,7 +32,8 @@ def apply_global_style():
         .warning{border-left:6px solid #D39B2A}
         .danger{border-left:6px solid #B74B45}
         div[data-testid="stMetric"]{border:1px solid rgba(60,90,45,.14);border-radius:16px;padding:.75rem;background:rgba(255,255,255,.65)}
-        .stButton button,.stFormSubmitButton button{min-height:3.6rem;border-radius:15px;font-size:1.02rem;font-weight:750;padding:.75rem 1rem}
+        .stButton button,.stFormSubmitButton button{min-height:3.6rem;border-radius:15px;font-size:1.02rem;font-weight:750;padding:.75rem 1rem;background:#3F7428!important;color:#fff!important;border:1px solid #2E571D!important}
+        .stButton button:hover,.stFormSubmitButton button:hover{background:#2E571D!important;color:#fff!important;border-color:#214014!important}
         @media(max-width:700px){
             .block-container{padding-top:2.8rem;padding-left:.65rem;padding-right:.65rem}
             .brand{font-size:1.65rem}
