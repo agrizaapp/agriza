@@ -201,6 +201,7 @@ menu_pages = [
 view_pages = [
     "🌾 Safras",
     "🛒 Compras",
+    "🧾 Contas e pagamentos",
     "🚜 Máquinas e financiamentos",
     "💰 Vendas",
     "📈 Mercado regional",
@@ -420,11 +421,11 @@ elif page == "📝 Lançar / Visualizar":
         st.rerun()
 
     c5, c6 = st.columns(2)
-    if c5.button("📈 Informar cotação", use_container_width=True):
+    if c5.button("📈 Cotações", use_container_width=True):
         st.session_state.current_page = "📈 Mercado regional"
         st.rerun()
     if c6.button("📋 Ver contas e pagamentos", use_container_width=True):
-        st.session_state.current_page = "🛒 Compras"
+        st.session_state.current_page = "🧾 Contas e pagamentos"
         st.rerun()
 
     st.info(
@@ -734,6 +735,68 @@ elif page == "🌾 Safras":
                     log_action(user["id"], "alterou", "safra", item["id"], f"active={new_active}")
                     st.rerun()
 
+
+elif page == "🧾 Contas e pagamentos":
+    st.subheader("Contas a pagar e pagas")
+    st.caption("Acompanhe somente os compromissos financeiros, sem o formulário de novas compras.")
+    account_filter = st.radio(
+        "Exibir",
+        ["A pagar", "Pagas", "Todas"],
+        horizontal=True,
+        key="account_payment_filter",
+    )
+    accounts = q(
+        """SELECT id,description,supplier,due_date,total_value,status,installment_no
+           FROM commitments
+           WHERE COALESCE(status,'aberto') != 'cancelado'
+           ORDER BY due_date,id DESC"""
+    )
+    account_rows = []
+    account_statuses = {
+        account["id"]: commitment_status(account["id"]) for account in accounts
+    }
+    open_count = 0
+    paid_count = 0
+    for account in accounts:
+        payment = account_statuses[account["id"]]
+        is_paid = payment["remaining"] <= 0.01 or account.get("status") == "encerrado"
+        if is_paid:
+            paid_count += 1
+        else:
+            open_count += 1
+        if account_filter == "A pagar" and is_paid:
+            continue
+        if account_filter == "Pagas" and not is_paid:
+            continue
+        account_rows.append(
+            {
+                "Descrição": account["description"],
+                "Fornecedor": account.get("supplier") or "—",
+                "Parcela": account.get("installment_no") or "—",
+                "Vencimento": br_date(account.get("due_date")),
+                "Valor": money(account["total_value"]),
+                "Pago": money(payment["covered"]),
+                "Em aberto": money(payment["remaining"]),
+                "Situação": "Paga" if is_paid else "A pagar",
+            }
+        )
+
+    total_open = sum(
+        account_statuses[account["id"]]["remaining"]
+        for account in accounts
+        if account_statuses[account["id"]]["remaining"] > 0.01
+    )
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Contas a pagar", open_count)
+    a2.metric("Contas pagas", paid_count)
+    a3.metric("Valor em aberto", money(total_open))
+    if account_rows:
+        st.dataframe(pd.DataFrame(account_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("Não há contas nesta situação.")
+    if st.button("← Voltar para lançamentos", key="back_to_launch_from_accounts"):
+        st.session_state.current_page = "📝 Lançar / Visualizar"
+        st.rerun()
 
 elif page == "🛒 Compras":
     st.subheader("Compras e compromissos")
@@ -1501,14 +1564,6 @@ elif page == "🚜 Máquinas e financiamentos":
             )
 
             st.markdown("### 2. Parcelas do financiamento")
-            installment_count = st.number_input(
-                "Quantas parcelas serão pagas?",
-                min_value=1,
-                max_value=20,
-                value=default_count,
-                step=1,
-            )
-
             finance_table = st.selectbox(
                 "Tabela de financiamento",
                 ["Manual", "SAC", "Price", "Americana"],
@@ -1520,21 +1575,58 @@ elif page == "🚜 Máquinas e financiamentos":
             interest_rate = 0.0
             first_due_date = date.today()
             interval_months = 1
-            if finance_table != "Manual":
-                f1, f2, f3 = st.columns(3)
-                interest_rate = f1.number_input(
-                    "Juros por parcela (%)",
+            financed_value = float(total_value)
+
+            if finance_table == "Manual":
+                st.caption("Informe cada parcela manualmente, como já é feito hoje.")
+                installment_count = st.number_input(
+                    "Quantas parcelas serão pagas?",
+                    min_value=1,
+                    max_value=20,
+                    value=default_count,
+                    step=1,
+                )
+            else:
+                table_descriptions = {
+                    "SAC": "SAC: a amortização é constante e as parcelas diminuem ao longo do prazo.",
+                    "Price": "Price: as parcelas têm valor fixo durante todo o financiamento.",
+                    "Americana": "Americana: são pagos juros por período e o principal é quitado na última parcela.",
+                }
+                st.info(table_descriptions[finance_table])
+                st.markdown(f"#### Simular financiamento pela tabela {finance_table}")
+                f1, f2 = st.columns(2)
+                financed_value = f1.number_input(
+                    "Valor financiado (R$)",
+                    min_value=0.01,
+                    value=max(float(total_value), 0.01),
+                    step=1000.0,
+                    help="Valor que será usado no cálculo das parcelas. Pode ser diferente do valor total do bem caso exista entrada.",
+                )
+                installment_count = f2.number_input(
+                    "Prazo (número de parcelas)",
+                    min_value=1,
+                    max_value=240,
+                    value=max(int(default_count), 1),
+                    step=1,
+                )
+                f3, f4, f5 = st.columns(3)
+                interest_rate = f3.number_input(
+                    "Taxa de juros por período (%)",
                     min_value=0.0,
                     value=1.0,
                     step=0.1,
                 )
-                first_due_date = f2.date_input(
+                first_due_date = f4.date_input(
                     "Primeiro vencimento",
                     value=date.today() + timedelta(days=30),
                     format="DD/MM/YYYY",
                 )
-                interval_months = f3.number_input(
-                    "Intervalo (meses)", min_value=1, max_value=24, value=1
+                interval_months = f5.number_input(
+                    "Periodicidade (meses)", min_value=1, max_value=24, value=1
+                )
+                st.caption(
+                    f"Simulação: {int(installment_count)} parcelas, juros de {interest_rate:.2f}% por período "
+                    f"sobre {money(financed_value)}."
                 )
 
             example_dates = [
@@ -1578,7 +1670,7 @@ elif page == "🚜 Máquinas e financiamentos":
                     rows.append({"number": index + 1, "due_date": due_date_value,
                                  "value": installment_value, "crop": payment_crop_value})
             else:
-                balance = float(total_value)
+                balance = float(financed_value)
                 rate = float(interest_rate) / 100
                 count = int(installment_count)
                 fixed_payment = (
@@ -1589,7 +1681,7 @@ elif page == "🚜 Máquinas e financiamentos":
                 for index in range(count):
                     interest = balance * rate
                     if finance_table == "SAC":
-                        amortization = float(total_value) / count
+                        amortization = float(financed_value) / count
                         installment_value = amortization + interest
                     elif finance_table == "Americana":
                         amortization = balance if index == count - 1 else 0
@@ -1642,7 +1734,12 @@ elif page == "🚜 Máquinas e financiamentos":
                     "total_value": float(total_value),
                     "notes": (
                         notes.strip()
-                        + (f" · Tabela: {finance_table}" if finance_table != "Manual" else "")
+                        + (
+                            f" · Tabela: {finance_table} · Financiado: {money(financed_value)} "
+                            f"· Juros: {interest_rate:.2f}% por período"
+                            if finance_table != "Manual"
+                            else ""
+                        )
                     ).strip(" ·"),
                     "rows": valid_rows,
                 }
