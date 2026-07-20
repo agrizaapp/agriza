@@ -24,6 +24,7 @@ def apply_global_style():
         """
         <style>
         #MainMenu, footer {visibility:hidden;}
+        html,body,[class*="css"]{font-size:1.06rem;}
         .block-container{max-width:1120px;padding-top:3.25rem;padding-bottom:5rem}
         .brand{display:flex;align-items:center;min-height:3.2rem;font-size:2rem;font-weight:850;line-height:1.25;letter-spacing:-.04em;padding-top:.25rem;overflow:visible}
         .subbrand{opacity:.7;margin-top:.05rem;margin-bottom:.9rem;line-height:1.4}
@@ -32,15 +33,17 @@ def apply_global_style():
         .warning{border-left:6px solid #D39B2A}
         .danger{border-left:6px solid #B74B45}
         div[data-testid="stMetric"]{border:1px solid rgba(60,90,45,.14);border-radius:16px;padding:.75rem;background:rgba(255,255,255,.65)}
-        .stButton button,.stFormSubmitButton button{min-height:3.6rem;border-radius:15px;font-size:1.02rem;font-weight:750;padding:.75rem 1rem;background:#3F7428!important;color:#fff!important;border:1px solid #2E571D!important}
-        .stButton button:hover,.stFormSubmitButton button:hover{background:#2E571D!important;color:#fff!important;border-color:#214014!important}
+        .stButton button,.stFormSubmitButton button{min-height:3.6rem;border-radius:15px;font-size:1.08rem;font-weight:750;padding:.75rem 1rem;background:#76B947!important;color:#17330E!important;border:1px solid #578D32!important}
+        .stButton button:hover,.stFormSubmitButton button:hover{background:#629D3B!important;color:#102509!important;border-color:#3F7428!important}
+        [class*="st-key-info_"] button{min-height:1.65rem!important;min-width:1.8rem!important;padding:.1rem .35rem!important;border-radius:999px!important;background:#E9EEE7!important;color:#50604C!important;border:1px solid #C6D0C2!important;font-size:.78rem!important}
+        [class*="st-key-info_"] button:hover{background:#DDE6D9!important;color:#33402F!important;border-color:#AEBBA8!important}
         @media(max-width:700px){
             .block-container{padding-top:2.8rem;padding-left:.65rem;padding-right:.65rem}
             .brand{font-size:1.65rem}
             div[data-testid="column"]{min-width:100%!important}
             .stButton button,.stFormSubmitButton button{
                 min-height:4.35rem;
-                font-size:1.15rem;
+                font-size:1.2rem;
                 border-radius:18px;
                 padding:.9rem 1rem;
                 touch-action:manipulation;
