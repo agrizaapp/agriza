@@ -230,20 +230,21 @@ with st.expander(
     f"☰ Menu principal — {st.session_state.current_page}",
     expanded=True,
 ):
-    st.caption("Toque em uma área para abrir. Os botões foram ampliados para uso no celular.")
-    for start in range(0, len(pages), 2):
-        cols = st.columns(2, gap="small")
-        for offset, label in enumerate(pages[start:start + 2]):
-            with cols[offset]:
-                button_type = "primary" if label == st.session_state.current_page else "secondary"
-                if st.button(
-                    label,
-                    key=f"nav_{start + offset}",
-                    use_container_width=True,
-                    type=button_type,
-                ):
-                    st.session_state.current_page = label
-                    st.rerun()
+    st.caption("Toque em uma área para abrir.")
+    with st.container(key="main_menu_grid"):
+        for start in range(0, len(pages), 2):
+            cols = st.columns(2, gap="small")
+            for offset, label in enumerate(pages[start:start + 2]):
+                with cols[offset]:
+                    button_type = "primary" if label == st.session_state.current_page else "secondary"
+                    if st.button(
+                        label,
+                        key=f"nav_{start + offset}",
+                        use_container_width=True,
+                        type=button_type,
+                    ):
+                        st.session_state.current_page = label
+                        st.rerun()
 
 page = st.session_state.current_page
 

@@ -44,6 +44,12 @@ def apply_global_style():
                 padding:.9rem 1rem;
                 touch-action:manipulation;
             }
+            /* O menu permanece em duas colunas no celular; os demais layouts empilham. */
+            [class*="st-key-main_menu_grid"] div[data-testid="stColumn"]{
+                min-width:0!important;
+                width:calc(50% - .2rem)!important;
+                flex:1 1 0!important;
+            }
             div[data-testid="stExpander"] summary{
                 min-height:4rem;
                 font-size:1.08rem;
