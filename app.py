@@ -182,7 +182,24 @@ if "user" not in st.session_state:
 user = st.session_state.user
 CAN_EDIT = user["role"] in ("admin", "operador")
 
-st.caption(f"Olá, **{user['name']}** · {user['role'].capitalize()}")
+identity_column, logout_column = st.columns([4, 1])
+identity_column.caption(f"Olá, **{user['name']}** · {user['role'].capitalize()}")
+if logout_column.button("Sair da conta", key="logout_top", use_container_width=True):
+    active_token = (
+        st.session_state.get("persistent_token")
+        or cookie_manager.get(COOKIE_NAME)
+    )
+    try:
+        revoke_persistent_session(active_token)
+    except Exception:
+        pass
+    try:
+        cookie_manager.delete(COOKIE_NAME)
+    except Exception:
+        pass
+    st.session_state.pop("persistent_token", None)
+    st.session_state.pop("user", None)
+    st.rerun()
 
 PAYMENT_OPTIONS = [
     "Soja",
@@ -213,6 +230,23 @@ if user["role"] == "admin":
 
 if "current_page" not in st.session_state or st.session_state.current_page not in pages:
     st.session_state.current_page = pages[0]
+
+if "page_history" not in st.session_state:
+    st.session_state.page_history = []
+last_page = st.session_state.get("last_rendered_page")
+if last_page and last_page != st.session_state.current_page:
+    if not st.session_state.pop("skip_next_page_history", False):
+        st.session_state.page_history.append(last_page)
+st.session_state.last_rendered_page = st.session_state.current_page
+
+if st.session_state.current_page != "🏠 Início":
+    if st.button("← Voltar", key="global_back_button"):
+        st.session_state.current_page = (
+            st.session_state.page_history.pop()
+            if st.session_state.page_history else "🏠 Início"
+        )
+        st.session_state.skip_next_page_history = True
+        st.rerun()
 
 with st.expander(
     f"☰ Menu principal — {st.session_state.current_page}",
@@ -406,25 +440,33 @@ elif page == "📝 Lançar / Visualizar":
 
     c1, c2 = st.columns(2)
     if c1.button("🛒 Nova compra", use_container_width=True, type="primary"):
+        st.session_state.purchase_show_history = False
         st.session_state.current_page = "🛒 Compras"
         st.rerun()
     if c2.button("💰 Nova venda", use_container_width=True, type="primary"):
+        st.session_state.sale_show_history = False
         st.session_state.current_page = "💰 Vendas"
         st.rerun()
 
     c3, c4 = st.columns(2)
-    if c3.button("🚜 Máquina financiada", use_container_width=True):
-        st.session_state.current_page = "🚜 Máquinas e financiamentos"
+    if c3.button("📚 Histórico de compras", use_container_width=True):
+        st.session_state.purchase_show_history = True
+        st.session_state.current_page = "🛒 Compras"
         st.rerun()
-    if c4.button("🌾 Nova safra", use_container_width=True):
-        st.session_state.current_page = "🌾 Safras"
+    if c4.button("📚 Histórico de vendas", use_container_width=True):
+        st.session_state.sale_show_history = True
+        st.session_state.current_page = "💰 Vendas"
         st.rerun()
 
     c5, c6 = st.columns(2)
-    if c5.button("📈 Cotações", use_container_width=True):
+    if c5.button("🌾 Nova safra", use_container_width=True):
+        st.session_state.current_page = "🌾 Safras"
+        st.rerun()
+    if c6.button("📈 Cotações", use_container_width=True):
         st.session_state.current_page = "📈 Mercado regional"
         st.rerun()
-    if c6.button("📋 Ver contas e pagamentos", use_container_width=True):
+
+    if st.button("📋 Ver contas e pagamentos", use_container_width=True):
         st.session_state.current_page = "🧾 Contas e pagamentos"
         st.rerun()
 
@@ -794,6 +836,42 @@ elif page == "🧾 Contas e pagamentos":
         st.dataframe(pd.DataFrame(account_rows), use_container_width=True, hide_index=True)
     else:
         st.info("Não há contas nesta situação.")
+    if CAN_EDIT:
+        payable_accounts = [
+            account for account in accounts
+            if account_statuses[account["id"]]["remaining"] > 0.01
+            and account_filter in ("A pagar", "Todas")
+        ]
+        if payable_accounts:
+            st.markdown("### Baixar parcela paga")
+            st.caption("Use este botão somente quando a parcela tiver sido quitada integralmente.")
+            for account in payable_accounts:
+                payment = account_statuses[account["id"]]
+                p1, p2 = st.columns([3, 1])
+                p1.write(
+                    f"**{account['description']}** · vence em {br_date(account.get('due_date'))} "
+                    f"· falta {money(payment['remaining'])}"
+                )
+                if p2.button("✅ Marcar como paga", key=f"pay_full_account_{account['id']}"):
+                    try:
+                        insert_id(
+                            """INSERT INTO payments
+                               (commitment_id,payment_date,amount,notes,created_by)
+                               VALUES(:c,:d,:a,:n,:u)""",
+                            {
+                                "c": account["id"],
+                                "d": date.today(),
+                                "a": float(payment["remaining"]),
+                                "n": "Baixa integral pela tela de contas",
+                                "u": user["id"],
+                            },
+                        )
+                        ex("UPDATE commitments SET status='encerrado' WHERE id=:id", {"id": account["id"]})
+                        log_action(user["id"], "pagou", "compromisso", account["id"], money(payment["remaining"]))
+                        st.success("Parcela marcada como paga.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível registrar o pagamento. Tente novamente.")
     if st.button("← Voltar para lançamentos", key="back_to_launch_from_accounts"):
         st.session_state.current_page = "📝 Lançar / Visualizar"
         st.rerun()
@@ -818,6 +896,32 @@ elif page == "🛒 Compras":
         "Outro",
     ]
     payment_options = PAYMENT_OPTIONS
+    show_purchase_history = st.session_state.get("purchase_show_history", False)
+    purchase_nav_1, purchase_nav_2 = st.columns(2)
+    if purchase_nav_1.button("➕ Nova compra", key="open_new_purchase", use_container_width=True, type="primary" if not show_purchase_history else "secondary"):
+        st.session_state.purchase_show_history = False
+        st.rerun()
+    if purchase_nav_2.button("📚 Histórico de compras", key="open_purchase_history", use_container_width=True, type="primary" if show_purchase_history else "secondary"):
+        st.session_state.purchase_show_history = True
+        st.rerun()
+
+    purchase_history_season = "Todas"
+    purchase_history_year = "Todos"
+    purchase_history_crop = "Todas"
+    if show_purchase_history:
+        st.markdown("### Histórico de compras")
+        hf1, hf2, hf3 = st.columns(3)
+        purchase_history_season = hf1.selectbox(
+            "Safra", ["Todas"] + list(season_map), key="purchase_history_season"
+        )
+        purchase_history_year = hf2.selectbox(
+            "Ano", ["Todos"] + [str(year) for year in range(date.today().year, date.today().year - 11, -1)],
+            key="purchase_history_year",
+        )
+        purchase_history_crop = hf3.selectbox(
+            "Cultura", ["Todas", "Soja", "Milho", "Trigo", "Canola", "Caixa"],
+            key="purchase_history_crop",
+        )
 
     def save_purchase_record(
         description,
@@ -896,7 +1000,7 @@ elif page == "🛒 Compras":
             st.caption(f"Detalhe técnico: {error}")
             return False
 
-    if CAN_EDIT:
+    if CAN_EDIT and not show_purchase_history:
         st.markdown("### Nova compra")
         st.caption(
             "Escolha o tipo de lançamento. O AGRIZA mostrará apenas os campos necessários."
@@ -1199,8 +1303,9 @@ elif page == "🛒 Compras":
                         st.session_state.pop("voice_purchase_draft_v22", None)
                         st.rerun()
 
+    if show_purchase_history:
         st.markdown("---")
-        st.markdown("### Compras já registradas")
+        st.caption("Use os filtros para localizar compras, contratos e parcelas já registrados.")
     contracts = q(
         """SELECT pc.*,
                   COALESCE(SUM(c.total_value),0) AS installment_total,
@@ -1213,7 +1318,12 @@ elif page == "🛒 Compras":
            WHERE COALESCE(pc.status,'aberto')!='cancelado'
            GROUP BY pc.id
            ORDER BY pc.purchase_date DESC,pc.id DESC"""
-    )
+    ) if show_purchase_history else []
+    if purchase_history_year != "Todos":
+        contracts = [
+            contract for contract in contracts
+            if str(contract.get("purchase_date") or "")[:4] == purchase_history_year
+        ]
 
     if contracts:
         st.markdown("---")
@@ -1251,11 +1361,19 @@ elif page == "🛒 Compras":
                     f"**Data da compra:** "
                     f"{br_date(contract.get('purchase_date'))}"
                 )
+                paid_installments = sum(
+                    1 for installment in installments
+                    if commitment_status(installment["id"])["remaining"] <= 0.01
+                )
+                st.caption(
+                    f"{paid_installments} parcela(s) paga(s) · "
+                    f"{len(installments) - paid_installments} parcela(s) a pagar"
+                )
                 for installment in installments:
                     installment_status = commitment_status(installment["id"])
-                    mark = "✅" if installment_status["remaining"] <= 0.01 else "◯"
+                    mark = "✅ Paga" if installment_status["remaining"] <= 0.01 else "⏳ A pagar"
                     st.write(
-                        f"{mark} **Parcela {installment.get('installment_no') or '-'}** "
+                        f"{mark} · **Parcela {installment.get('installment_no') or '-'}** "
                         f"— {br_date(installment['due_date'])} — "
                         f"{money(installment['total_value'])} — "
                         f"pagar com **{installment.get('payment_crop') or 'Caixa'}** "
@@ -1267,8 +1385,21 @@ elif page == "🛒 Compras":
            WHERE COALESCE(status,'aberto')!='cancelado'
              AND contract_id IS NULL
            ORDER BY due_date,id DESC"""
-    )
-    if not commitments:
+    ) if show_purchase_history else []
+    if show_purchase_history:
+        season_crop_by_id = {season["id"]: season["crop"] for season in seasons}
+        selected_season_id = season_map.get(purchase_history_season)
+        commitments = [
+            item for item in commitments
+            if (purchase_history_season == "Todas" or item.get("season_id") == selected_season_id)
+            and (purchase_history_year == "Todos" or str(item.get("purchase_date") or "")[:4] == purchase_history_year)
+            and (
+                purchase_history_crop == "Todas"
+                or season_crop_by_id.get(item.get("season_id"), item.get("payment_crop")) == purchase_history_crop
+                or item.get("payment_crop") == purchase_history_crop
+            )
+        ]
+    if show_purchase_history and not commitments:
         st.caption("Nenhum compromisso registrado.")
 
     for item in commitments:
@@ -1681,6 +1812,9 @@ elif page == "🚜 Máquinas e financiamentos":
                     if finance_table == "Price" and rate > 0 else balance / count
                 )
                 schedule_preview = []
+                total_amortization = 0.0
+                total_interest = 0.0
+                total_installments = 0.0
                 for index in range(count):
                     interest = balance * rate
                     if finance_table == "SAC":
@@ -1694,6 +1828,9 @@ elif page == "🚜 Máquinas e financiamentos":
                         amortization = installment_value - interest
                     amortization = min(amortization, balance)
                     balance = max(balance - amortization, 0)
+                    total_amortization += amortization
+                    total_interest += interest
+                    total_installments += installment_value
                     due_date_value = first_due_date + timedelta(days=30 * int(interval_months) * index)
                     rows.append({"number": index + 1, "due_date": due_date_value,
                                  "value": round(installment_value, 2), "crop": "Caixa"})
@@ -1703,7 +1840,16 @@ elif page == "🚜 Máquinas e financiamentos":
                         "Amortização": money(amortization),
                         "Juros": money(interest),
                         "Valor": money(installment_value),
+                        "Saldo devedor": money(balance),
                     })
+                schedule_preview.append({
+                    "Parcela": "Total",
+                    "Vencimento": "—",
+                    "Amortização": money(total_amortization),
+                    "Juros": money(total_interest),
+                    "Valor": money(total_installments),
+                    "Saldo devedor": money(balance),
+                })
                 st.dataframe(pd.DataFrame(schedule_preview), use_container_width=True, hide_index=True)
 
             submitted = st.form_submit_button(
@@ -1945,11 +2091,19 @@ elif page == "🚜 Máquinas e financiamentos":
 
                     if installments:
                         st.markdown("#### Parcelas")
+                        paid_installments = sum(
+                            1 for installment in installments
+                            if commitment_status(installment["id"])["remaining"] <= 0.01
+                        )
+                        st.caption(
+                            f"{paid_installments} parcela(s) paga(s) · "
+                            f"{len(installments) - paid_installments} parcela(s) a pagar"
+                        )
                         for installment in installments:
                             status = commitment_status(installment["id"])
-                            mark = "✅" if status["remaining"] <= 0.01 else "◯"
+                            mark = "✅ Paga" if status["remaining"] <= 0.01 else "⏳ A pagar"
                             st.write(
-                                f"{mark} **Parcela "
+                                f"{mark} · **Parcela "
                                 f"{installment.get('installment_no') or '-'}** — "
                                 f"{installment.get('due_date')} — "
                                 f"{money(installment.get('total_value') or 0)} — "
@@ -1961,11 +2115,36 @@ elif page == "🚜 Máquinas e financiamentos":
 elif page == "💰 Vendas":
     st.subheader("Comercialização")
     seasons = q("SELECT id,name,crop FROM seasons WHERE active=TRUE ORDER BY id DESC")
+    show_sale_history = st.session_state.get("sale_show_history", False)
+    sale_nav_1, sale_nav_2 = st.columns(2)
+    if sale_nav_1.button("➕ Nova venda", key="open_new_sale", use_container_width=True, type="primary" if not show_sale_history else "secondary"):
+        st.session_state.sale_show_history = False
+        st.rerun()
+    if sale_nav_2.button("📚 Histórico de vendas", key="open_sale_history", use_container_width=True, type="primary" if show_sale_history else "secondary"):
+        st.session_state.sale_show_history = True
+        st.rerun()
 
     if not seasons:
         st.info("Cadastre uma safra antes de registrar vendas.")
     else:
         season_map = {f"{s['name']} · {s['crop']}": s["id"] for s in seasons}
+        sale_history_season = "Todas"
+        sale_history_year = "Todos"
+        sale_history_crop = "Todas"
+        if show_sale_history:
+            st.markdown("### Histórico de vendas")
+            hf1, hf2, hf3 = st.columns(3)
+            sale_history_season = hf1.selectbox(
+                "Safra", ["Todas"] + list(season_map), key="sale_history_season"
+            )
+            sale_history_year = hf2.selectbox(
+                "Ano", ["Todos"] + [str(year) for year in range(date.today().year, date.today().year - 11, -1)],
+                key="sale_history_year",
+            )
+            sale_history_crop = hf3.selectbox(
+                "Cultura", ["Todas", "Soja", "Milho", "Trigo", "Canola"],
+                key="sale_history_crop",
+            )
         commitments = q(
             """SELECT id,description,due_date FROM commitments
                WHERE COALESCE(status,'aberto')='aberto'
@@ -2034,7 +2213,7 @@ elif page == "💰 Vendas":
                 st.caption("Confira os dados e tente novamente.")
                 return False
 
-        if CAN_EDIT:
+        if CAN_EDIT and not show_sale_history:
             st.markdown("### Nova venda")
             st.caption(
                 "Preencha os dados, revise o resumo e só depois confirme o salvamento."
@@ -2328,9 +2507,16 @@ elif page == "💰 Vendas":
         """SELECT sales.*,seasons.name AS season_name,seasons.crop
            FROM sales JOIN seasons ON seasons.id=sales.season_id
            ORDER BY sale_date DESC,sales.id DESC"""
-    )
-    st.markdown("### Vendas já registradas")
-    if not sales:
+    ) if show_sale_history else []
+    if show_sale_history and seasons:
+        selected_sale_season_id = season_map.get(sale_history_season)
+        sales = [
+            item for item in sales
+            if (sale_history_season == "Todas" or item.get("season_id") == selected_sale_season_id)
+            and (sale_history_year == "Todos" or str(item.get("sale_date") or "")[:4] == sale_history_year)
+            and (sale_history_crop == "Todas" or item.get("crop") == sale_history_crop)
+        ]
+    if show_sale_history and not sales:
         st.caption("Nenhuma venda registrada.")
     for item in sales:
         with st.expander(
@@ -2546,16 +2732,17 @@ elif page == "📈 Mercado regional":
            ORDER BY q1.crop"""
     )
     latest_map = {item["crop"]: item for item in latest}
-    cols = st.columns(4)
-    for index, crop_name in enumerate(["Soja", "Milho", "Trigo", "Canola"]):
-        item = latest_map.get(crop_name)
-        if item:
-            cols[index].metric(crop_name, money(item["price_sc"]) + "/sc")
-            cols[index].caption(
-                f"{item.get('source') or 'Fonte não informada'} · {br_date(item.get('quoted_at'))}"
-            )
-        else:
-            cols[index].metric(crop_name, "Sem cotação")
+    with st.container(key="quote_summary"):
+        cols = st.columns(4)
+        for index, crop_name in enumerate(["Soja", "Milho", "Trigo", "Canola"]):
+            item = latest_map.get(crop_name)
+            if item:
+                cols[index].metric(crop_name, money(item["price_sc"]) + "/sc")
+                cols[index].caption(
+                    f"{item.get('source') or 'Fonte não informada'} · {br_date(item.get('quoted_at'))}"
+                )
+            else:
+                cols[index].metric(crop_name, "Sem cotação")
 
     if CAN_EDIT:
         with st.expander("✏️ Informar ou corrigir preço", expanded=False):
@@ -2782,23 +2969,3 @@ elif page == "📦 Reserva":
     )
     if logs:
         st.dataframe(pd.DataFrame(logs), use_container_width=True, hide_index=True)
-
-
-st.markdown("---")
-_, exit_column = st.columns([4, 1])
-if exit_column.button("Sair", key="logout_footer", use_container_width=True):
-    active_token = (
-        st.session_state.get("persistent_token")
-        or cookie_manager.get(COOKIE_NAME)
-    )
-    try:
-        revoke_persistent_session(active_token)
-    except Exception:
-        pass
-    try:
-        cookie_manager.delete(COOKIE_NAME)
-    except Exception:
-        pass
-    st.session_state.pop("persistent_token", None)
-    st.session_state.pop("user", None)
-    st.rerun()

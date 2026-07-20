@@ -35,6 +35,11 @@ def apply_global_style():
         div[data-testid="stMetric"]{border:1px solid rgba(60,90,45,.14);border-radius:16px;padding:.75rem;background:rgba(255,255,255,.65)}
         .stButton button,.stFormSubmitButton button{min-height:3.6rem;border-radius:15px;font-size:1.14rem;font-weight:750;padding:.75rem 1rem;background:#76B947!important;color:#17330E!important;border:1px solid #578D32!important}
         .stButton button:hover,.stFormSubmitButton button:hover{background:#629D3B!important;color:#102509!important;border-color:#3F7428!important}
+        .stButton button[kind="primary"],.stFormSubmitButton button[kind="primary"]{background:#3E7D2B!important;color:#FFFFFF!important;border-color:#2E6320!important;box-shadow:inset 0 0 0 2px rgba(255,255,255,.16)!important}
+        .stButton button[kind="primary"]:hover,.stFormSubmitButton button[kind="primary"]:hover{background:#2E6320!important;color:#FFFFFF!important}
+        [class*="st-key-logout_top"] button{min-height:2.65rem!important;background:#EEF1ED!important;color:#465244!important;border:1px solid #B8C2B5!important;font-size:.95rem!important}
+        [class*="st-key-logout_top"] button:hover{background:#E0E5DE!important;color:#273226!important;border-color:#96A291!important}
+        [class*="st-key-quote_summary"] div[data-testid="stMetricValue"]{font-size:1.45rem!important}
         [class*="st-key-info_"] button{min-height:1.65rem!important;min-width:1.8rem!important;padding:.1rem .35rem!important;border-radius:999px!important;background:#E9EEE7!important;color:#50604C!important;border:1px solid #C6D0C2!important;font-size:.78rem!important}
         [class*="st-key-info_"] button:hover{background:#DDE6D9!important;color:#33402F!important;border-color:#AEBBA8!important}
         @media(max-width:700px){
