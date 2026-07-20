@@ -1522,6 +1522,17 @@ elif page == "🚜 Máquinas e financiamentos":
             default_contract_value = 0.0
             default_count = 1
 
+        st.markdown("### Tipo de financiamento")
+        finance_table = st.selectbox(
+            "Tabela de financiamento",
+            ["Manual", "SAC", "Price", "Americana"],
+            key="machine_finance_table_v103",
+            help=(
+                "A seleção atualiza imediatamente os campos abaixo. Manual mantém as parcelas "
+                "preenchidas por você; as demais opções fazem a simulação automática."
+            ),
+        )
+
         with st.form("machine_financing_v102", clear_on_submit=False):
             m1, m2 = st.columns(2)
             machine_name = m1.text_input(
@@ -1564,14 +1575,6 @@ elif page == "🚜 Máquinas e financiamentos":
             )
 
             st.markdown("### 2. Parcelas do financiamento")
-            finance_table = st.selectbox(
-                "Tabela de financiamento",
-                ["Manual", "SAC", "Price", "Americana"],
-                help=(
-                    "Manual mantém as parcelas preenchidas por você. As demais opções "
-                    "calculam automaticamente as parcelas a partir do valor e dos juros."
-                ),
-            )
             interest_rate = 0.0
             first_due_date = date.today()
             interval_months = 1
