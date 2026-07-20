@@ -33,6 +33,13 @@ def apply_global_style():
         .danger{border-left:6px solid #B74B45}
         div[data-testid="stMetric"]{border:1px solid rgba(60,90,45,.14);border-radius:16px;padding:.75rem;background:rgba(255,255,255,.65)}
         .stButton button,.stFormSubmitButton button{min-height:3.6rem;border-radius:15px;font-size:1.02rem;font-weight:750;padding:.75rem 1rem}
+        /* Somente os botões do menu principal: mais compactos, sem alterar ações. */
+        [class*="st-key-nav_"] button{
+            min-height:1.9rem!important;
+            border-radius:10px!important;
+            font-size:.86rem!important;
+            padding:.28rem .45rem!important;
+        }
         @media(max-width:700px){
             .block-container{padding-top:2.8rem;padding-left:.65rem;padding-right:.65rem}
             .brand{font-size:1.65rem}
@@ -43,6 +50,13 @@ def apply_global_style():
                 border-radius:18px;
                 padding:.9rem 1rem;
                 touch-action:manipulation;
+            }
+            [class*="st-key-nav_"] button{
+                min-height:2.15rem!important;
+                border-radius:10px!important;
+                font-size:.82rem!important;
+                line-height:1.1!important;
+                padding:.28rem .35rem!important;
             }
             div[data-testid="stExpander"] summary{
                 min-height:4rem;

@@ -230,7 +230,7 @@ with st.expander(
     f"☰ Menu principal — {st.session_state.current_page}",
     expanded=True,
 ):
-    st.caption("Toque em uma área para abrir. Os botões foram ampliados para uso no celular.")
+    st.caption("Toque em uma área para abrir.")
     for start in range(0, len(pages), 2):
         cols = st.columns(2, gap="small")
         for offset, label in enumerate(pages[start:start + 2]):
