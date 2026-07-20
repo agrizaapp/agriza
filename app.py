@@ -481,8 +481,22 @@ elif page == "🌾 Safras":
                 f"Vendido **{num(summary['sold_pct'])}%**"
             )
 
+            a1, a2, a3 = st.columns(3)
+            if a1.button("👁️ Visualizar", key=f"view_season_{item['id']}"):
+                st.info(
+                    f"Custo total estimado: {money(summary['total_cost'])}. "
+                    f"Saldo livre: {num(summary['balance'], 0)} sacas."
+                )
+            if CAN_EDIT and a2.button("✏️ Editar", key=f"open_edit_season_{item['id']}"):
+                st.session_state[f"edit_season_open_{item['id']}"] = True
+            if CAN_EDIT and a3.button("🗑️ Excluir", key=f"delete_season_{item['id']}"):
+                st.session_state[f"confirm_delete_season_{item['id']}"] = True
+
             if CAN_EDIT:
-                with st.expander("✏️ Editar custo da safra"):
+                with st.expander(
+                    "✏️ Editar custo da safra",
+                    expanded=st.session_state.get(f"edit_season_open_{item['id']}", False),
+                ):
                     with st.form(f"edit_cost_{item['id']}"):
                         current_cost = float(item["cost_ha"] or 0)
                         new_cost = st.number_input(
@@ -527,6 +541,19 @@ elif page == "🌾 Safras":
                             st.success(
                                 f"Custo atualizado para {money(new_cost)} por hectare."
                             )
+                            st.session_state.pop(f"edit_season_open_{item['id']}", None)
+
+            if st.session_state.get(f"confirm_delete_season_{item['id']}"):
+                st.warning("A safra será desativada. As vendas e o histórico permanecerão preservados.")
+                d1, d2 = st.columns(2)
+                if d1.button("Confirmar exclusão", key=f"confirm_season_delete_{item['id']}"):
+                    ex("UPDATE seasons SET active=FALSE WHERE id=:id", {"id": item["id"]})
+                    log_action(user["id"], "desativou", "safra", item["id"], item["name"])
+                    st.success("Safra desativada.")
+                    st.rerun()
+                if d2.button("Cancelar", key=f"cancel_season_delete_{item['id']}"):
+                    st.session_state.pop(f"confirm_delete_season_{item['id']}", None)
+                    st.rerun()
 
             if summary["actual_production"] is not None:
                 variation_text = (
@@ -1194,8 +1221,21 @@ elif page == "🛒 Compras":
             st.write(f"**Pago:** {money(status['paid'])}")
             st.write(f"**Ainda falta:** {money(status['remaining'])}")
 
+            a1, a2, a3 = st.columns(3)
+            if a1.button("👁️ Visualizar", key=f"view_purchase_{item['id']}"):
+                st.info(
+                    f"Compra de {money(item['total_value'])}; faltam {money(status['remaining'])} para encerrar."
+                )
+            if CAN_EDIT and a2.button("✏️ Editar", key=f"open_edit_purchase_{item['id']}"):
+                st.session_state[f"edit_purchase_open_{item['id']}"] = True
+            if CAN_EDIT and a3.button("🗑️ Excluir", key=f"delete_purchase_{item['id']}"):
+                st.session_state[f"confirm_delete_purchase_{item['id']}"] = True
+
             if CAN_EDIT:
-                with st.expander("✏️ Editar esta compra"):
+                with st.expander(
+                    "✏️ Editar esta compra",
+                    expanded=st.session_state.get(f"edit_purchase_open_{item['id']}", False),
+                ):
                     season_labels = list(season_map)
                     current_season_label = "Nenhuma"
                     for label, season_id in season_map.items():
@@ -1305,9 +1345,22 @@ elif page == "🛒 Compras":
                                 )
                                 st.session_state.current_page = "🛒 Compras"
                                 st.success("Compra atualizada com sucesso.")
+                                st.session_state.pop(f"edit_purchase_open_{item['id']}", None)
                             except Exception as error:
                                 st.error("Não foi possível atualizar a compra.")
                                 st.caption("Confira os dados e tente novamente.")
+
+            if st.session_state.get(f"confirm_delete_purchase_{item['id']}"):
+                st.warning("A compra será cancelada e deixará de aparecer nos totais em aberto.")
+                d1, d2 = st.columns(2)
+                if d1.button("Confirmar exclusão", key=f"confirm_purchase_delete_{item['id']}"):
+                    ex("UPDATE commitments SET status='cancelado' WHERE id=:id", {"id": item["id"]})
+                    log_action(user["id"], "cancelou", "compromisso", item["id"], item["description"])
+                    st.success("Compra cancelada.")
+                    st.rerun()
+                if d2.button("Cancelar", key=f"cancel_purchase_delete_{item['id']}"):
+                    st.session_state.pop(f"confirm_delete_purchase_{item['id']}", None)
+                    st.rerun()
 
             if CAN_EDIT and item.get("status", "aberto") == "aberto":
                 with st.form(f"payment_{item['id']}", clear_on_submit=True):
@@ -1736,6 +1789,49 @@ elif page == "🚜 Máquinas e financiamentos":
                         f"**Valor da compra:** "
                         f"{money(machine.get('contract_total') or machine.get('acquisition_value') or 0)}"
                     )
+                    a1, a2, a3 = st.columns(3)
+                    if a1.button("👁️ Visualizar", key=f"view_machine_{machine['id']}"):
+                        st.info(
+                            f"Aquisição em {br_date(machine.get('acquisition_date'))}; "
+                            f"status: {machine.get('status') or 'ativo'}."
+                        )
+                    if CAN_EDIT and a2.button("✏️ Editar", key=f"open_edit_machine_{machine['id']}"):
+                        st.session_state[f"edit_machine_{machine['id']}"] = True
+                    if CAN_EDIT and a3.button("🗑️ Excluir", key=f"delete_machine_{machine['id']}"):
+                        st.session_state[f"confirm_delete_machine_{machine['id']}"] = True
+
+                    if st.session_state.get(f"edit_machine_{machine['id']}"):
+                        with st.form(f"machine_edit_form_{machine['id']}"):
+                            em1, em2 = st.columns(2)
+                            edit_machine_name = em1.text_input("Nome", value=machine.get("name") or "")
+                            edit_machine_brand = em2.text_input("Marca", value=machine.get("brand") or "")
+                            em3, em4 = st.columns(2)
+                            edit_machine_model = em3.text_input("Modelo", value=machine.get("model") or "")
+                            edit_machine_year = em4.number_input("Ano", min_value=1950, max_value=2100, value=int(machine.get("year") or date.today().year))
+                            edit_machine_notes = st.text_area("Observação", value=machine.get("notes") or "")
+                            save_machine_edit = st.form_submit_button("Salvar alterações")
+                        if save_machine_edit:
+                            ex("""UPDATE machinery SET name=:n,brand=:b,model=:m,year=:y,notes=:o WHERE id=:id""",
+                               {"n": edit_machine_name.strip(), "b": edit_machine_brand.strip(), "m": edit_machine_model.strip(), "y": edit_machine_year, "o": edit_machine_notes.strip(), "id": machine["id"]})
+                            log_action(user["id"], "editou", "máquina", machine["id"], edit_machine_name.strip())
+                            st.session_state.pop(f"edit_machine_{machine['id']}", None)
+                            st.success("Máquina atualizada.")
+                            st.rerun()
+
+                    if st.session_state.get(f"confirm_delete_machine_{machine['id']}"):
+                        st.warning("A máquina e as parcelas abertas do contrato serão marcadas como excluídas/canceladas.")
+                        d1, d2 = st.columns(2)
+                        if d1.button("Confirmar exclusão", key=f"confirm_machine_delete_{machine['id']}"):
+                            ex("UPDATE machinery SET status='excluido' WHERE id=:id", {"id": machine["id"]})
+                            if machine.get("contract_id"):
+                                ex("UPDATE purchase_contracts SET status='cancelado' WHERE id=:id", {"id": machine["contract_id"]})
+                                ex("UPDATE commitments SET status='cancelado' WHERE contract_id=:id AND COALESCE(status,'aberto')='aberto'", {"id": machine["contract_id"]})
+                            log_action(user["id"], "excluiu", "máquina", machine["id"], machine["name"])
+                            st.success("Máquina excluída.")
+                            st.rerun()
+                        if d2.button("Cancelar", key=f"cancel_machine_delete_{machine['id']}"):
+                            st.session_state.pop(f"confirm_delete_machine_{machine['id']}", None)
+                            st.rerun()
 
                     installments = q(
                         """SELECT * FROM commitments
@@ -2406,13 +2502,14 @@ elif page == "📈 Mercado regional":
                     st.rerun()
 
     history = q(
-        """SELECT crop,price_sc,source,region,quote_type,quoted_at
+        """SELECT id,crop,price_sc,source,region,quote_type,quoted_at
            FROM quotes ORDER BY quoted_at DESC,id DESC LIMIT 40"""
     )
     if history:
         st.markdown("### Histórico recente")
         history_frame = pd.DataFrame(history)
         history_frame["quoted_at"] = history_frame["quoted_at"].map(br_date)
+        history_frame = history_frame.drop(columns=["id"])
         history_frame = history_frame.rename(
             columns={
                 "crop": "Produto",
@@ -2424,6 +2521,45 @@ elif page == "📈 Mercado regional":
             }
         )
         st.dataframe(history_frame, use_container_width=True, hide_index=True)
+        for quote in history:
+            with st.expander(f"{quote['crop']} · {money(quote['price_sc'])}/sc · {br_date(quote['quoted_at'])}"):
+                st.write(f"**Fonte:** {quote.get('source') or 'Não informada'}")
+                st.write(f"**Praça/região:** {quote.get('region') or 'Não informada'}")
+                a1, a2, a3 = st.columns(3)
+                if a1.button("👁️ Visualizar", key=f"view_quote_{quote['id']}"):
+                    st.info("Esta cotação é usada como referência para recomendações e vendas da cultura.")
+                if CAN_EDIT and a2.button("✏️ Editar", key=f"open_edit_quote_{quote['id']}"):
+                    st.session_state[f"edit_quote_{quote['id']}"] = True
+                if CAN_EDIT and a3.button("🗑️ Excluir", key=f"delete_quote_{quote['id']}"):
+                    st.session_state[f"confirm_delete_quote_{quote['id']}"] = True
+
+                if st.session_state.get(f"edit_quote_{quote['id']}"):
+                    with st.form(f"quote_edit_form_{quote['id']}"):
+                        eq1, eq2 = st.columns(2)
+                        edit_quote_crop = eq1.selectbox("Produto", ["Soja", "Milho", "Trigo", "Canola"], index=["Soja", "Milho", "Trigo", "Canola"].index(quote["crop"]) if quote["crop"] in ["Soja", "Milho", "Trigo", "Canola"] else 0)
+                        edit_quote_price = eq2.number_input("Preço (R$/sc)", min_value=0.0, value=float(quote["price_sc"]))
+                        edit_quote_source = st.text_input("Fonte", value=quote.get("source") or "")
+                        edit_quote_region = st.text_input("Praça/região", value=quote.get("region") or "")
+                        save_quote_edit = st.form_submit_button("Salvar alterações")
+                    if save_quote_edit:
+                        ex("""UPDATE quotes SET crop=:c,price_sc=:p,source=:s,region=:r WHERE id=:id""",
+                           {"c": edit_quote_crop, "p": edit_quote_price, "s": edit_quote_source.strip(), "r": edit_quote_region.strip(), "id": quote["id"]})
+                        log_action(user["id"], "editou", "cotação", quote["id"], edit_quote_crop)
+                        st.session_state.pop(f"edit_quote_{quote['id']}", None)
+                        st.success("Cotação atualizada.")
+                        st.rerun()
+
+                if st.session_state.get(f"confirm_delete_quote_{quote['id']}"):
+                    st.warning("A cotação será removida do histórico e deixará de ser usada como referência.")
+                    d1, d2 = st.columns(2)
+                    if d1.button("Confirmar exclusão", key=f"confirm_quote_delete_{quote['id']}"):
+                        ex("DELETE FROM quotes WHERE id=:id", {"id": quote["id"]})
+                        log_action(user["id"], "excluiu", "cotação", quote["id"], quote["crop"])
+                        st.success("Cotação excluída.")
+                        st.rerun()
+                    if d2.button("Cancelar", key=f"cancel_quote_delete_{quote['id']}"):
+                        st.session_state.pop(f"confirm_delete_quote_{quote['id']}", None)
+                        st.rerun()
 
 
 elif page == "👥 Usuários":
