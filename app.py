@@ -195,8 +195,7 @@ PAYMENT_OPTIONS = [
 
 menu_pages = [
     "🏠 Início",
-    "➕ Lançar",
-    "👁️ Visualizar",
+    "📝 Lançar / Visualizar",
     "🤖 AgroIA",
 ]
 view_pages = [
@@ -278,15 +277,15 @@ if page == "🏠 Início":
         c3.metric("Saldo livre", f"{num(summary['balance'], 0)} sc")
 
         i1, i2, i3 = st.columns(3)
-        if i1.button("ℹ️ Produção", key="info_production"):
+        if i1.button("ℹ️", key="info_production", help="Como a produção é calculada"):
             st.info(
                 "Produção estimada = área da safra × produtividade prevista. "
                 "Quando a colheita é informada, o indicador passa a usar a produção colhida."
             )
-        if i2.button("ℹ️ Vendas", key="info_sold"):
+        if i2.button("ℹ️", key="info_sold", help="Ver vendas contabilizadas"):
             st.session_state.current_page = "💰 Vendas"
             st.rerun()
-        if i3.button("ℹ️ Saldo", key="info_balance"):
+        if i3.button("ℹ️", key="info_balance", help="Como o saldo é calculado"):
             st.info(
                 "Saldo livre = produção da safra − quantidade das vendas de grãos registradas."
             )
@@ -297,12 +296,12 @@ if page == "🏠 Início":
         c6.metric("Preço necessário", money(summary["required_price"]))
 
         i4, i5, i6 = st.columns(3)
-        if i4.button("ℹ️ Custo", key="info_cost"):
+        if i4.button("ℹ️", key="info_cost", help="Como o custo é calculado"):
             st.info("Custo por saca = custo total da safra ÷ produção considerada.")
-        if i5.button("ℹ️ Ver vendas", key="info_average"):
+        if i5.button("ℹ️", key="info_average", help="Ver vendas usadas no preço médio"):
             st.session_state.current_page = "💰 Vendas"
             st.rerun()
-        if i6.button("ℹ️ Preço", key="info_required"):
+        if i6.button("ℹ️", key="info_required", help="Como o preço necessário é calculado"):
             st.info(
                 "Preço necessário = valor que falta para atingir a margem cadastrada ÷ saldo livre."
             )
@@ -314,6 +313,9 @@ if page == "🏠 Início":
             st.session_state[recommendation_key] = agroia_recommendation(season)
             st.session_state[f"recommendation_generated_{season['id']}"] = datetime.now()
         rec = st.session_state[recommendation_key]
+        generated_at = st.session_state.get(f"recommendation_generated_{season['id']}")
+        if generated_at:
+            st.caption(f"✓ Análise atualizada em {generated_at.strftime('%d/%m/%Y %H:%M')}")
         st.markdown(
             f"""<div class="card {rec['level']}">
             <small>RECOMENDAÇÃO AGROIA</small>
@@ -397,9 +399,9 @@ elif page == "👁️ Visualizar":
                     st.rerun()
 
 
-elif page == "➕ Lançar":
-    st.subheader("O que você quer lançar?")
-    st.caption("Escolha uma opção. O AGRIZA leva você direto ao lugar certo.")
+elif page == "📝 Lançar / Visualizar":
+    st.subheader("Lançar ou visualizar")
+    st.caption("Escolha uma área. Em cada tela você pode registrar e consultar seus lançamentos.")
 
     c1, c2 = st.columns(2)
     if c1.button("🛒 Nova compra", use_container_width=True, type="primary"):
