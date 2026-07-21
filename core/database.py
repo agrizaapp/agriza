@@ -137,6 +137,11 @@ def init_db():
             contract_id INTEGER,
             installment_no INTEGER,
             season_id INTEGER,
+            company_id INTEGER,
+            product_id INTEGER,
+            unit_id INTEGER,
+            quantity NUMERIC(16,3),
+            unit_price NUMERIC(16,2),
             category VARCHAR(80) NOT NULL,
             description VARCHAR(240) NOT NULL,
             supplier VARCHAR(180),
@@ -242,6 +247,11 @@ def init_db():
     add_missing_column("commitments", "purchase_date", "DATE")
     add_missing_column("commitments", "contract_id", "INTEGER")
     add_missing_column("commitments", "installment_no", "INTEGER")
+    add_missing_column("commitments", "company_id", "INTEGER")
+    add_missing_column("commitments", "product_id", "INTEGER")
+    add_missing_column("commitments", "unit_id", "INTEGER")
+    add_missing_column("commitments", "quantity", "NUMERIC(16,3)")
+    add_missing_column("commitments", "unit_price", "NUMERIC(16,2)")
     add_missing_column("sales", "created_at", timestamp_column)
     add_missing_column("sales", "payment_date", "DATE")
     # Mantém os metadados do Mercado Regional compatíveis entre SQLite e PostgreSQL.

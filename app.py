@@ -929,6 +929,168 @@ elif page == "🛒 Compras":
             key="purchase_history_crop",
         )
 
+    if st.session_state.pop("reset_purchase_route_v31", False):
+        st.session_state.pop("purchase_route_v31", None)
+
+    if CAN_EDIT and not show_purchase_history:
+        st.markdown("### Nova compra")
+        purchase_route = st.radio(
+            "Tipo de compra",
+            ["Insumos", "Máquinas", "Bancos"],
+            horizontal=True,
+            key="purchase_route_v31",
+        )
+        if purchase_route in ("Máquinas", "Bancos"):
+            st.session_state.reset_purchase_route_v31 = True
+            st.session_state.current_page = "🚜 Máquinas e financiamentos"
+            st.rerun()
+
+        companies = q("SELECT id,name FROM companies WHERE active=TRUE ORDER BY name")
+        products = q(
+            """SELECT products.id,products.name,products.unit_id
+               FROM products WHERE products.active=TRUE ORDER BY products.name"""
+        )
+        units = q("SELECT id,code,description FROM units WHERE active=TRUE ORDER BY code")
+        if not companies or not products or not units:
+            st.warning("Cadastre ao menos uma empresa, um produto e uma unidade antes de lançar insumos.")
+            if st.button("⚙️ Abrir Cadastro", key="open_catalog_from_purchase", use_container_width=True):
+                st.session_state.current_page = "⚙️ Cadastro"
+                st.rerun()
+            st.stop()
+
+        company_map = {company["name"]: company for company in companies}
+        product_map = {product["name"]: product for product in products}
+        unit_map = {
+            f"{unit['code']} · {unit.get('description') or unit['code']}": unit
+            for unit in units
+        }
+
+        draft = st.session_state.get("insumo_purchase_review_v31")
+        if not draft:
+            c1, c2 = st.columns(2)
+            selected_company_name = c1.selectbox("Empresa", list(company_map), key="insumo_company_v31")
+            selected_product_name = c2.selectbox("Produto", list(product_map), key="insumo_product_v31")
+            selected_product = product_map[selected_product_name]
+            default_unit_index = next(
+                (
+                    index for index, unit in enumerate(unit_map.values())
+                    if unit["id"] == selected_product.get("unit_id")
+                ),
+                0,
+            )
+
+            c3, c4 = st.columns(2)
+            purchase_date = c3.date_input(
+                "Data da compra", value=date.today(), format="DD/MM/YYYY", key="insumo_purchase_date_v31"
+            )
+            payment_date = c4.date_input(
+                "Data do pagamento", value=date.today(), format="DD/MM/YYYY", key="insumo_payment_date_v31"
+            )
+            c5, c6 = st.columns(2)
+            quantity = c5.number_input("Quantidade", min_value=0.0, step=1.0, key="insumo_quantity_v31")
+            selected_unit_label = c6.selectbox(
+                "Unidade", list(unit_map), index=default_unit_index, key="insumo_unit_v31"
+            )
+            unit_price = st.number_input(
+                "Valor unitário (R$)", min_value=0.0, step=0.01, format="%.2f", key="insumo_unit_price_v31"
+            )
+            total_value = round(float(quantity) * float(unit_price), 2)
+            st.number_input("Valor total (R$)", value=total_value, format="%.2f", disabled=True)
+
+            if st.button("🔎 Revisar compra", key="review_insumo_purchase_v31", use_container_width=True, type="primary"):
+                if quantity <= 0 or unit_price <= 0:
+                    st.error("Informe uma quantidade e um valor unitário maiores que zero.")
+                else:
+                    st.session_state.insumo_purchase_review_v31 = {
+                        "company": company_map[selected_company_name],
+                        "product": selected_product,
+                        "unit": unit_map[selected_unit_label],
+                        "purchase_date": purchase_date,
+                        "payment_date": payment_date,
+                        "quantity": float(quantity),
+                        "unit_price": float(unit_price),
+                        "total_value": total_value,
+                    }
+                    st.rerun()
+        else:
+            confirmation_card(
+                "🧾 Resumo da compra de insumos",
+                [
+                    ("Empresa", draft["company"]["name"]),
+                    ("Produto", draft["product"]["name"]),
+                    ("Data da compra", br_date(draft["purchase_date"])),
+                    ("Data do pagamento", br_date(draft["payment_date"])),
+                    ("Quantidade", f"{num(draft['quantity'])} {draft['unit']['code']}"),
+                    ("Valor unitário", money(draft["unit_price"])),
+                ],
+                "Valor total",
+                money(draft["total_value"]),
+            )
+            r1, r2, r3 = st.columns(3)
+            save_insumo = r1.button("✅ Salvar", key="save_insumo_purchase_v31", use_container_width=True, type="primary")
+            cancel_insumo = r2.button("↩️ Cancelar e voltar", key="cancel_insumo_purchase_v31", use_container_width=True)
+            edit_insumo = r3.button("✏️ Editar compra", key="edit_insumo_purchase_v31", use_container_width=True)
+
+            if edit_insumo:
+                st.session_state.pop("insumo_purchase_review_v31", None)
+                st.rerun()
+            if cancel_insumo:
+                for key in [
+                    "insumo_purchase_review_v31", "insumo_company_v31", "insumo_product_v31",
+                    "insumo_purchase_date_v31", "insumo_payment_date_v31", "insumo_quantity_v31",
+                    "insumo_unit_v31", "insumo_unit_price_v31",
+                ]:
+                    st.session_state.pop(key, None)
+                st.session_state.current_page = "📝 Lançar / Visualizar"
+                st.rerun()
+            if save_insumo:
+                duplicate = q(
+                    """SELECT id FROM commitments
+                       WHERE COALESCE(status,'aberto') != 'cancelado'
+                         AND company_id=:company_id AND product_id=:product_id
+                         AND purchase_date=:purchase_date AND due_date=:payment_date
+                         AND quantity=:quantity AND unit_price=:unit_price
+                       LIMIT 1""",
+                    {
+                        "company_id": draft["company"]["id"],
+                        "product_id": draft["product"]["id"],
+                        "purchase_date": draft["purchase_date"],
+                        "payment_date": draft["payment_date"],
+                        "quantity": draft["quantity"],
+                        "unit_price": draft["unit_price"],
+                    },
+                )
+                if duplicate:
+                    st.warning("Esta compra de insumo já está registrada. Nada foi salvo.")
+                else:
+                    commitment_id = insert_id(
+                        """INSERT INTO commitments
+                           (company_id,product_id,unit_id,quantity,unit_price,category,description,
+                            supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
+                           VALUES(:company_id,:product_id,:unit_id,:quantity,:unit_price,'Insumos',:description,
+                                  :supplier,:total_value,:purchase_date,:payment_date,'Caixa',:notes,'aberto',:created_by)""",
+                        {
+                            "company_id": draft["company"]["id"],
+                            "product_id": draft["product"]["id"],
+                            "unit_id": draft["unit"]["id"],
+                            "quantity": draft["quantity"],
+                            "unit_price": draft["unit_price"],
+                            "description": draft["product"]["name"],
+                            "supplier": draft["company"]["name"],
+                            "total_value": draft["total_value"],
+                            "purchase_date": draft["purchase_date"],
+                            "payment_date": draft["payment_date"],
+                            "notes": f"{num(draft['quantity'])} {draft['unit']['code']} × {money(draft['unit_price'])}",
+                            "created_by": user["id"],
+                        },
+                    )
+                    log_action(user["id"], "criou", "compra_insumo", commitment_id, draft["product"]["name"])
+                    for key in ["insumo_purchase_review_v31", "insumo_quantity_v31", "insumo_unit_price_v31"]:
+                        st.session_state.pop(key, None)
+                    st.success("Compra de insumo salva com sucesso.")
+                    st.rerun()
+        st.stop()
+
     def save_purchase_record(
         description,
         category,
