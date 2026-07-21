@@ -129,6 +129,32 @@ class TestPaginaMercado:
         at = _abrir("admin", "📈 Mercado regional")
         assert any("Inteligência de mercado" in str(m.value) for m in at.markdown)
 
+    def test_importacao_disponivel_para_quem_edita(self, banco_limpo):
+        at = _abrir("admin", "📈 Mercado regional")
+        assert any("Importar histórico" in str(e.label) for e in at.expander)
+
+    def test_importacao_oculta_para_perfil_consulta(self, banco_limpo):
+        at = _abrir("consulta", "📈 Mercado regional")
+        assert not any("Importar histórico" in str(e.label) for e in at.expander)
+
+    def test_serie_importada_aparece_no_painel(self, banco_limpo):
+        """Fecha o ciclo: planilha entra, indicadores saem."""
+        from services.market_data.importer import importar_linhas, parse_price_csv
+
+        csv_texto = "Data;Cultura;Preço\n" + "\n".join(
+            f"{dia:02d}/03/2026;Soja;{preco},00"
+            for dia, preco in zip(range(1, 8), [90, 95, 100, 105, 110, 115, 120])
+        )
+        linhas, erros = parse_price_csv(csv_texto.encode("utf-8"),
+                                        culturas_validas=["Soja"])
+        assert erros == []
+        assert importar_linhas(linhas, user_id=1)["gravadas"] == 7
+
+        at = _abrir("admin", "📈 Mercado regional", market_analysis_crop="Soja")
+        rotulos = [m.label for m in at.metric]
+        assert "Posição no histórico" in rotulos
+        assert "Tendência" in rotulos
+
     def test_painel_com_serie_mostra_indicadores(self, banco_limpo):
         from services.market_data.history import record_quote
 

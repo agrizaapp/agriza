@@ -30,6 +30,7 @@ from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
 from services.market_data import build_market_view
 from services.market_data.sources import available_sources, planned_sources, collect
+from services.market_data.importer import parse_price_csv, importar_linhas
 try:
     from market_prices import update_regional_quotes, latest_quote_for_crop
 except ModuleNotFoundError:
@@ -3039,6 +3040,103 @@ elif page == "📈 Mercado regional":
                 "É apoio à decisão sobre venda de grão físico, não recomendação "
                 "de operação financeira — a decisão é sua."
             )
+
+    if CAN_EDIT:
+        with st.expander("📥 Importar histórico de preços (planilha)"):
+            st.caption(
+                "Traga de uma vez o histórico que você já tem. Quanto mais fundo o "
+                "histórico, melhor a leitura de mercado. Nada é gravado antes de você conferir."
+            )
+            st.markdown(
+                "**Formato:** arquivo `.csv` com as colunas **Data**, **Cultura** e "
+                "**Preço**. As colunas *Fonte* e *Praça* são opcionais. "
+                "Aceita o CSV que o Excel em português gera (`;` e vírgula decimal)."
+            )
+            st.code(
+                "Data;Cultura;Preço;Fonte;Praça\n"
+                "01/03/2026;Soja;138,50;Cooperativa;Santo Ângelo/RS\n"
+                "08/03/2026;Soja;140,00;Cooperativa;Santo Ângelo/RS",
+                language="text",
+            )
+
+            enviado = st.file_uploader(
+                "Arquivo CSV", type=["csv", "txt"], key="import_historico_arquivo"
+            )
+            previa = st.session_state.get("import_historico_previa")
+
+            if enviado is not None and not previa:
+                linhas, erros = parse_price_csv(
+                    enviado.getvalue(),
+                    culturas_validas=["Soja", "Milho", "Trigo", "Canola"],
+                )
+                st.session_state.import_historico_previa = {
+                    "linhas": linhas, "erros": erros, "nome": enviado.name,
+                }
+                st.rerun()
+
+            if previa:
+                linhas, erros = previa["linhas"], previa["erros"]
+                st.write(f"**Arquivo:** {previa['nome']}")
+
+                if erros:
+                    st.warning(f"{len(erros)} linha(s) com problema — serão ignoradas:")
+                    for erro in erros[:10]:
+                        st.write("•", erro)
+                    if len(erros) > 10:
+                        st.caption(f"... e mais {len(erros) - 10}.")
+
+                if linhas:
+                    datas = [item["data"] for item in linhas]
+                    resumo_cols = st.columns(3)
+                    resumo_cols[0].metric("Preços válidos", len(linhas))
+                    resumo_cols[1].metric(
+                        "Período",
+                        f"{min(datas).strftime('%m/%Y')} → {max(datas).strftime('%m/%Y')}",
+                    )
+                    resumo_cols[2].metric(
+                        "Culturas", ", ".join(sorted({i["cultura"] for i in linhas}))
+                    )
+                    previa_frame = pd.DataFrame([
+                        {
+                            "Data": item["data"].strftime("%d/%m/%Y"),
+                            "Cultura": item["cultura"],
+                            "Preço": money(item["preco"]),
+                            "Fonte": item["fonte"] or "—",
+                            "Praça": item["regiao"] or "—",
+                        }
+                        for item in linhas[:15]
+                    ])
+                    st.dataframe(previa_frame, use_container_width=True, hide_index=True)
+                    if len(linhas) > 15:
+                        st.caption(f"Mostrando 15 de {len(linhas)} linhas.")
+
+                imp1, imp2 = st.columns(2)
+                confirmar = imp1.button(
+                    f"✅ Importar {len(linhas)} preço(s)",
+                    key="confirmar_import_historico",
+                    use_container_width=True,
+                    type="primary",
+                    disabled=not linhas,
+                )
+                cancelar = imp2.button(
+                    "↩️ Cancelar", key="cancelar_import_historico",
+                    use_container_width=True,
+                )
+                if cancelar:
+                    st.session_state.pop("import_historico_previa", None)
+                    st.rerun()
+                if confirmar:
+                    resultado = importar_linhas(linhas, user_id=user["id"])
+                    log_action(
+                        user["id"], "importou", "cotação", None,
+                        f"{resultado['gravadas']} preços de {previa['nome']}",
+                    )
+                    st.session_state.pop("import_historico_previa", None)
+                    st.success(
+                        f"{resultado['gravadas']} preço(s) importado(s). "
+                        f"{resultado['ignoradas']} já existia(m) e foram ignorados."
+                    )
+                    st.rerun()
 
     with st.expander("🌐 Fontes de dados"):
         st.caption("Fontes conectadas e planejadas para alimentar a série de preços.")

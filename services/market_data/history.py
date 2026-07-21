@@ -58,13 +58,17 @@ def distinct_crops():
 
 
 def record_quote(crop, price, *, source, region=None, quote_type="externa",
-                 source_url=None, user_id=None):
-    """Grava um ponto na série. Reaproveitado pelos conectores externos."""
+                 source_url=None, user_id=None, quoted_at=None):
+    """Grava um ponto na série. Reaproveitado por conectores e pela importação.
+
+    ``quoted_at`` permite gravar um preço com data passada — indispensável para
+    importar histórico. Quando omitido, vale o instante atual.
+    """
     return insert_id(
         """INSERT INTO quotes
            (crop, price_sc, source, quoted_at, created_by, region, quote_type, source_url)
-           VALUES(:crop, :price, :source, CURRENT_TIMESTAMP, :user_id, :region,
-                  :quote_type, :source_url)""",
+           VALUES(:crop, :price, :source, COALESCE(:quoted_at, CURRENT_TIMESTAMP),
+                  :user_id, :region, :quote_type, :source_url)""",
         {
             "crop": crop,
             "price": float(price),
@@ -73,5 +77,6 @@ def record_quote(crop, price, *, source, region=None, quote_type="externa",
             "region": region,
             "quote_type": quote_type,
             "source_url": source_url,
+            "quoted_at": quoted_at,
         },
     )
