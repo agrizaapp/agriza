@@ -205,6 +205,24 @@ def init_db():
             description TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
+        f"""CREATE TABLE IF NOT EXISTS companies(
+            id {id_def},
+            name VARCHAR(180) NOT NULL UNIQUE,
+            notes TEXT,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        f"""CREATE TABLE IF NOT EXISTS products(
+            id {id_def},
+            name VARCHAR(180) NOT NULL,
+            unit_code VARCHAR(12) NOT NULL,
+            notes TEXT,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(name, unit_code)
+        )""",
     ]
 
     with engine.begin() as conn:
@@ -212,8 +230,14 @@ def init_db():
             conn.execute(text(statement))
         for statement in [
             "CREATE INDEX IF NOT EXISTS idx_sales_season ON sales(season_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sales_commitment ON sales(commitment_id)",
             "CREATE INDEX IF NOT EXISTS idx_commitments_due ON commitments(due_date)",
+            "CREATE INDEX IF NOT EXISTS idx_commitments_season ON commitments(season_id)",
+            "CREATE INDEX IF NOT EXISTS idx_commitments_contract ON commitments(contract_id)",
+            "CREATE INDEX IF NOT EXISTS idx_payments_commitment ON payments(commitment_id)",
             "CREATE INDEX IF NOT EXISTS idx_quotes_crop_date ON quotes(crop, quoted_at)",
+            "CREATE INDEX IF NOT EXISTS idx_companies_name ON companies(name)",
+            "CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)",
         ]:
             conn.execute(text(statement))
 
