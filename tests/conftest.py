@@ -22,6 +22,7 @@ from core.database import ex, init_db  # noqa: E402
 TABELAS = [
     "payments", "sales", "commitments", "purchase_contracts", "machinery",
     "seasons", "quotes", "products", "companies", "activity_log",
+    "fundamentals",
 ]
 
 

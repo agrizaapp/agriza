@@ -199,6 +199,17 @@ def init_db():
             details TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
+        f"""CREATE TABLE IF NOT EXISTS fundamentals(
+            id {id_def},
+            source VARCHAR(40) NOT NULL,
+            commodity VARCHAR(60) NOT NULL,
+            statistic VARCHAR(60) NOT NULL,
+            region VARCHAR(120),
+            year INTEGER NOT NULL,
+            value NUMERIC(18,4),
+            unit VARCHAR(40),
+            collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
         f"""CREATE TABLE IF NOT EXISTS pilot_feedback(
             id {id_def},
             user_id INTEGER,
@@ -223,6 +234,8 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_quotes_crop_date ON quotes(crop, quoted_at)",
             "CREATE INDEX IF NOT EXISTS idx_companies_name ON companies(name)",
             "CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)",
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_fundamentals_unico
+               ON fundamentals(source,commodity,statistic,year)""",
         ]:
             conn.execute(text(statement))
 

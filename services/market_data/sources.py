@@ -117,16 +117,11 @@ SOURCES = {
         available=False,
         note="Dados públicos brasileiros de oferta, demanda e preços.",
     ),
-    "usda": Source(
-        key="usda",
-        label="USDA (oferta mundial)",
-        kind="publico",
-        country="US",
-        fetch=_not_configured("usda", "USDA"),
-        available=False,
-        note="Dados públicos dos EUA via API oficial; produtividade e estoques mundiais.",
-    ),
 }
+
+# O USDA deliberadamente não está aqui: ele publica produção e produtividade,
+# não preço. Alimentar a série de preços com ele distorceria os indicadores.
+# Vive em `fundamentals.py`, como camada separada de oferta.
 
 
 def available_sources():
