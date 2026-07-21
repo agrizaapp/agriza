@@ -10,33 +10,36 @@ from __future__ import annotations
 from core.database import insert_id, q
 
 
+# Consultas estáticas: a região opcional entra como predicado parametrizado,
+# em vez de fragmento concatenado. Nada de SQL montado por f-string.
+_SERIE_POSTGRES = """
+    SELECT price_sc, quoted_at, source, region, quote_type
+    FROM quotes
+    WHERE lower(crop) = lower(:crop)
+      AND quoted_at >= CURRENT_TIMESTAMP - CAST(:days AS INTEGER) * INTERVAL '1 day'
+      AND (:region IS NULL OR region = :region)
+    ORDER BY quoted_at ASC, id ASC
+"""
+
+_SERIE_SQLITE = """
+    SELECT price_sc, quoted_at, source, region, quote_type
+    FROM quotes
+    WHERE lower(crop) = lower(:crop)
+      AND quoted_at >= datetime('now', '-' || :days || ' day')
+      AND (:region IS NULL OR region = :region)
+    ORDER BY quoted_at ASC, id ASC
+"""
+
+
 def price_series(crop, days=180, region=None):
     """Série de preços de uma cultura, em ordem cronológica crescente.
 
     Cada item é ``{"date": ..., "price": float, "source": ..., "region": ...}``.
     Filtra por janela de dias e, opcionalmente, por praça/região.
     """
-    params = {"crop": crop, "days": int(days)}
-    filtro_regiao = ""
-    if region:
-        filtro_regiao = " AND region = :region"
-        params["region"] = region
-
     rows = q(
-        f"""SELECT price_sc, quoted_at, source, region, quote_type
-            FROM quotes
-            WHERE lower(crop) = lower(:crop)
-              AND quoted_at >= CURRENT_TIMESTAMP - CAST(:days AS INTEGER) * INTERVAL '1 day'
-              {filtro_regiao}
-            ORDER BY quoted_at ASC, id ASC"""
-        if _is_postgres()
-        else f"""SELECT price_sc, quoted_at, source, region, quote_type
-                 FROM quotes
-                 WHERE lower(crop) = lower(:crop)
-                   AND quoted_at >= datetime('now', '-' || :days || ' day')
-                   {filtro_regiao}
-                 ORDER BY quoted_at ASC, id ASC""",
-        params,
+        _SERIE_POSTGRES if _is_postgres() else _SERIE_SQLITE,
+        {"crop": crop, "days": int(days), "region": region},
     )
     return [
         {

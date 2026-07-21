@@ -35,6 +35,9 @@ def table_columns(table_name):
 
 def add_missing_column(table_name, column_name, definition):
     if column_name not in table_columns(table_name):
+        # sql-dinamico-ok: DDL não aceita parâmetro para nome de tabela/coluna.
+        # Os três valores são constantes internas, escritas no próprio código —
+        # nunca chegam de entrada do usuário.
         ex(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 

@@ -70,6 +70,13 @@ class TestSerieHistorica:
         assert prices_only("Trigo", days=30) == []
         assert prices_only("Trigo", days=180) == [70.0]
 
+    def test_filtro_por_regiao(self, banco_limpo):
+        record_quote("Soja", 100, source="t", region="Santo Ângelo/RS")
+        record_quote("Soja", 200, source="t", region="Cruz Alta/RS")
+        assert prices_only("Soja", days=365) == [100.0, 200.0]
+        assert prices_only("Soja", days=365, region="Cruz Alta/RS") == [200.0]
+        assert prices_only("Soja", days=365, region="Inexistente") == []
+
     def test_build_market_view_ponta_a_ponta(self, banco_limpo):
         for preco in [90, 95, 100, 105, 110, 115, 120]:
             record_quote("Soja", preco, source="teste")
