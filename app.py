@@ -1793,6 +1793,221 @@ elif page == "🚜 Máquinas e financiamentos":
         "em um único passo."
     )
 
+    machine_screen = st.radio(
+        "Área de máquinas",
+        ["➕ Nova máquina", "📋 Máquinas cadastradas"],
+        horizontal=True,
+        key="machine_screen_v31",
+    )
+    if CAN_EDIT and machine_screen == "➕ Nova máquina":
+        companies = q("SELECT id,name FROM companies WHERE active=TRUE ORDER BY name")
+        if not companies:
+            st.warning("Cadastre primeiro o fornecedor na área Cadastro → Empresa.")
+            if st.button("⚙️ Abrir Cadastro", key="open_catalog_from_machine", use_container_width=True):
+                st.session_state.current_page = "⚙️ Cadastro"
+                st.rerun()
+            st.stop()
+
+        supplier_map = {company["name"]: company for company in companies}
+        review = st.session_state.get("machine_purchase_review_v31")
+        if not review:
+            st.markdown("### Nova máquina")
+            model = st.text_input("Modelo da máquina", placeholder="Ex.: Plantadeira 13 linhas", key="machine_model_v31")
+            supplier_name = st.selectbox("Fornecedor", list(supplier_map), key="machine_supplier_v31")
+            machine_mode = st.radio(
+                "Forma de pagamento",
+                ["À vista", "Parcelada", "Financiada"],
+                horizontal=True,
+                key="machine_mode_v31",
+            )
+            rows = []
+            purchase_date = date.today()
+            financed_value = 0.0
+            interest_rate = 0.0
+            finance_table = None
+
+            if machine_mode == "À vista":
+                c1, c2, c3 = st.columns(3)
+                purchase_date = c1.date_input("Data da compra", value=date.today(), format="DD/MM/YYYY", key="machine_cash_date_v31")
+                payment_date = c2.date_input("Data do pagamento", value=purchase_date, format="DD/MM/YYYY", key="machine_cash_payment_date_v31")
+                paid_value = c3.number_input("Valor pago (R$)", min_value=0.0, step=1000.0, key="machine_cash_value_v31")
+                rows = [{"number": 1, "due_date": payment_date, "value": float(paid_value)}]
+                financed_value = float(paid_value)
+
+            elif machine_mode == "Parcelada":
+                c1, c2, c3 = st.columns(3)
+                purchase_date = c1.date_input("Data da compra", value=date.today(), format="DD/MM/YYYY", key="machine_installment_date_v31")
+                financed_value = c2.number_input("Valor da máquina (R$)", min_value=0.0, step=1000.0, key="machine_installment_total_v31")
+                installment_count = c3.number_input("Número de parcelas", min_value=1, max_value=60, value=2, step=1, key="machine_installment_count_v31")
+                st.markdown("#### Parcelas")
+                default_value = float(financed_value) / int(installment_count) if installment_count else 0.0
+                for index in range(int(installment_count)):
+                    p1, p2 = st.columns(2)
+                    due_date_value = p1.date_input(
+                        f"Vencimento da parcela {index + 1}",
+                        value=purchase_date + timedelta(days=30 * (index + 1)),
+                        format="DD/MM/YYYY",
+                        key=f"machine_installment_due_v31_{index}",
+                    )
+                    installment_value = p2.number_input(
+                        f"Valor da parcela {index + 1} (R$)",
+                        min_value=0.0,
+                        value=default_value,
+                        step=1000.0,
+                        key=f"machine_installment_value_v31_{index}",
+                    )
+                    rows.append({"number": index + 1, "due_date": due_date_value, "value": float(installment_value)})
+
+            else:
+                c1, c2, c3 = st.columns(3)
+                purchase_date = c1.date_input("Data da compra", value=date.today(), format="DD/MM/YYYY", key="machine_financed_date_v31")
+                financed_value = c2.number_input("Valor do bem financiado (R$)", min_value=0.0, step=1000.0, key="machine_financed_value_v31")
+                years = c3.number_input("Anos para pagar", min_value=1, max_value=30, value=3, step=1, key="machine_financed_years_v31")
+                c4, c5 = st.columns(2)
+                interest_rate = c4.number_input("Taxa de juros anual (%)", min_value=0.0, value=10.0, step=0.1, key="machine_financed_rate_v31")
+                finance_table = c5.selectbox("Tabela", ["SAC", "Price"], key="machine_financed_table_v31")
+                calculation_signature = (float(financed_value), int(years), float(interest_rate), finance_table)
+                if st.session_state.get("machine_financed_signature_v31") != calculation_signature:
+                    for index in range(30):
+                        st.session_state.pop(f"machine_financed_due_v31_{index}", None)
+                        st.session_state.pop(f"machine_financed_value_v31_{index}", None)
+                    st.session_state.machine_financed_signature_v31 = calculation_signature
+
+                balance = float(financed_value)
+                rate = float(interest_rate) / 100
+                count = int(years)
+                fixed_payment = (
+                    balance * rate / (1 - (1 + rate) ** -count)
+                    if finance_table == "Price" and rate > 0 else balance / count
+                ) if count else 0.0
+                st.markdown("#### Parcelas calculadas — você pode ajustar os valores")
+                for index in range(count):
+                    interest = balance * rate
+                    if finance_table == "SAC":
+                        amortization = float(financed_value) / count
+                        calculated_value = amortization + interest
+                    else:
+                        calculated_value = fixed_payment
+                        amortization = calculated_value - interest
+                    amortization = min(amortization, balance)
+                    balance = max(balance - amortization, 0)
+                    p1, p2, p3 = st.columns(3)
+                    p1.write(f"**Parcela {index + 1}**")
+                    due_date_value = p2.date_input(
+                        "Vencimento",
+                        value=purchase_date + timedelta(days=365 * (index + 1)),
+                        format="DD/MM/YYYY",
+                        key=f"machine_financed_due_v31_{index}",
+                    )
+                    installment_value = p3.number_input(
+                        "Valor da parcela (R$)",
+                        min_value=0.0,
+                        value=round(calculated_value, 2),
+                        step=100.0,
+                        key=f"machine_financed_value_v31_{index}",
+                    )
+                    rows.append({"number": index + 1, "due_date": due_date_value, "value": float(installment_value)})
+                total_with_interest = sum(row["value"] for row in rows)
+                s1, s2, s3 = st.columns(3)
+                s1.metric("Valor financiado", money(financed_value))
+                s2.metric("Total de juros", money(max(total_with_interest - float(financed_value), 0)))
+                s3.metric("Total com juros", money(total_with_interest))
+
+            total_due = sum(row["value"] for row in rows)
+            if st.button("🔎 Conferir operação", key="review_machine_purchase_v31", use_container_width=True, type="primary"):
+                if not model.strip():
+                    st.error("Informe o modelo da máquina.")
+                elif financed_value <= 0 or not rows or any(row["value"] <= 0 for row in rows):
+                    st.error("Confira o valor da máquina e todas as parcelas.")
+                else:
+                    st.session_state.machine_purchase_review_v31 = {
+                        "model": model.strip(),
+                        "supplier": supplier_map[supplier_name],
+                        "mode": machine_mode,
+                        "purchase_date": purchase_date,
+                        "financed_value": float(financed_value),
+                        "interest_rate": float(interest_rate),
+                        "finance_table": finance_table,
+                        "total_due": float(total_due),
+                        "rows": rows,
+                    }
+                    st.rerun()
+        else:
+            confirmation_card(
+                "🚜 Conferência da operação",
+                [
+                    ("Modelo", review["model"]),
+                    ("Fornecedor", review["supplier"]["name"]),
+                    ("Forma de pagamento", review["mode"]),
+                    ("Data da compra", br_date(review["purchase_date"])),
+                    ("Valor do bem", money(review["financed_value"])),
+                    ("Tabela", review["finance_table"] or "Não se aplica"),
+                    ("Juros totais", money(max(review["total_due"] - review["financed_value"], 0))),
+                ],
+                "Total a pagar",
+                money(review["total_due"]),
+            )
+            for row in review["rows"]:
+                st.write(f"Parcela {row['number']} · {br_date(row['due_date'])} · {money(row['value'])}")
+            r1, r2, r3 = st.columns(3)
+            confirm_machine = r1.button("✅ Confirmar", key="confirm_machine_purchase_v31", use_container_width=True, type="primary")
+            cancel_machine = r2.button("↩️ Cancelar e voltar", key="cancel_machine_purchase_v31", use_container_width=True)
+            edit_machine = r3.button("✏️ Editar", key="edit_machine_purchase_v31", use_container_width=True)
+
+            if edit_machine:
+                st.session_state.pop("machine_purchase_review_v31", None)
+                st.rerun()
+            if cancel_machine:
+                for key in ["machine_purchase_review_v31", "machine_model_v31", "machine_supplier_v31", "machine_mode_v31"]:
+                    st.session_state.pop(key, None)
+                st.session_state.current_page = "📝 Lançar / Visualizar"
+                st.rerun()
+            if confirm_machine:
+                duplicate = q(
+                    """SELECT id FROM purchase_contracts
+                       WHERE COALESCE(status,'aberto') != 'cancelado'
+                         AND lower(trim(description))=lower(trim(:description))
+                         AND lower(trim(supplier))=lower(trim(:supplier))
+                         AND purchase_date=:purchase_date AND total_value=:total_value
+                       LIMIT 1""",
+                    {"description": review["model"], "supplier": review["supplier"]["name"], "purchase_date": review["purchase_date"], "total_value": review["total_due"]},
+                )
+                if duplicate:
+                    st.warning("Esta operação de máquina já está registrada. Nada foi salvo.")
+                else:
+                    notes = (
+                        f"{review['mode']}"
+                        + (f" · {review['finance_table']} · juros {review['interest_rate']:.2f}% a.a." if review["finance_table"] else "")
+                    )
+                    contract_id = insert_id(
+                        """INSERT INTO purchase_contracts(description,supplier,category,total_value,purchase_date,notes,status,created_by)
+                           VALUES(:d,:s,'Máquinas',:v,:pd,:n,'aberto',:u)""",
+                        {"d": review["model"], "s": review["supplier"]["name"], "v": review["total_due"], "pd": review["purchase_date"], "n": notes, "u": user["id"]},
+                    )
+                    machine_id = insert_id(
+                        """INSERT INTO machinery(name,model,acquisition_date,acquisition_value,contract_id,status,notes,created_by)
+                           VALUES(:n,:m,:d,:v,:c,'ativo',:o,:u)""",
+                        {"n": review["model"], "m": review["model"], "d": review["purchase_date"], "v": review["financed_value"], "c": contract_id, "o": notes, "u": user["id"]},
+                    )
+                    for row in review["rows"]:
+                        status = "encerrado" if review["mode"] == "À vista" else "aberto"
+                        commitment_id = insert_id(
+                            """INSERT INTO commitments(contract_id,installment_no,category,description,supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
+                               VALUES(:contract_id,:installment_no,'Máquinas',:description,:supplier,:total_value,:purchase_date,:due_date,'Caixa',:notes,:status,:created_by)""",
+                            {"contract_id": contract_id, "installment_no": row["number"], "description": f"{review['model']} · Parcela {row['number']}", "supplier": review["supplier"]["name"], "total_value": row["value"], "purchase_date": review["purchase_date"], "due_date": row["due_date"], "notes": notes, "status": status, "created_by": user["id"]},
+                        )
+                        if review["mode"] == "À vista":
+                            insert_id(
+                                """INSERT INTO payments(commitment_id,payment_date,amount,notes,created_by)
+                                   VALUES(:commitment_id,:payment_date,:amount,:notes,:created_by)""",
+                                {"commitment_id": commitment_id, "payment_date": row["due_date"], "amount": row["value"], "notes": "Pagamento à vista", "created_by": user["id"]},
+                            )
+                    log_action(user["id"], "criou", "maquina", machine_id, review["model"])
+                    st.session_state.pop("machine_purchase_review_v31", None)
+                    st.success("Máquina e operação registradas com sucesso.")
+                    st.rerun()
+        st.stop()
+
     tab_new, tab_list = st.tabs(
         ["➕ Cadastrar máquina financiada", "📋 Máquinas cadastradas"]
     )
