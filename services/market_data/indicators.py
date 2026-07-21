@@ -88,6 +88,24 @@ def change_pct(prices, periods=1):
     return round((prices[-1] - anterior) / anterior * 100, 1)
 
 
+def rolling_average(prices, window):
+    """Média móvel ponto a ponto, do mesmo tamanho da série.
+
+    Os primeiros pontos, sem janela completa, vêm como ``None`` — assim o
+    gráfico simplesmente não desenha a linha ali, em vez de inventar valor.
+    """
+    if window <= 0:
+        return [None] * len(prices)
+    saida = []
+    for indice in range(len(prices)):
+        if indice + 1 < window:
+            saida.append(None)
+        else:
+            janela = prices[indice + 1 - window: indice + 1]
+            saida.append(mean(janela))
+    return saida
+
+
 def summarize_series(prices, *, short_window=7, long_window=30):
     """Consolida os indicadores de uma série num único dicionário.
 
