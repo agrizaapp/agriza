@@ -155,6 +155,19 @@ class TestPaginaMercado:
         assert "Posição no histórico" in rotulos
         assert "Tendência" in rotulos
 
+    def test_grafico_aparece_quando_ha_serie(self, banco_limpo):
+        """O AppTest não modela line_chart; a legenda serve de prova indireta."""
+        from services.market_data.history import record_quote
+
+        for preco in [90, 95, 100, 105, 110, 115, 120]:
+            record_quote("Soja", preco, source="teste")
+        at = _abrir("admin", "📈 Mercado regional", market_analysis_crop="Soja")
+        assert any("Preço registrado" in str(c.value) for c in at.caption)
+
+    def test_sem_grafico_quando_falta_serie(self, banco_limpo):
+        at = _abrir("admin", "📈 Mercado regional", market_analysis_crop="Canola")
+        assert not any("Preço registrado" in str(c.value) for c in at.caption)
+
     def test_painel_com_serie_mostra_indicadores(self, banco_limpo):
         from services.market_data.history import record_quote
 

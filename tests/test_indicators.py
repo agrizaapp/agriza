@@ -32,6 +32,33 @@ class TestMediasMoveis:
         assert exponential_moving_average([50, 50, 50, 50], 3) == pytest.approx(50)
 
 
+class TestMediaMovelPontoAPonto:
+    """Usada pelo gráfico: precisa ter o mesmo tamanho da série."""
+
+    def test_mesmo_tamanho_da_serie(self):
+        from services.market_data.indicators import rolling_average
+
+        assert len(rolling_average([1, 2, 3, 4, 5], 3)) == 5
+
+    def test_pontos_iniciais_ficam_vazios(self):
+        from services.market_data.indicators import rolling_average
+
+        r = rolling_average([10, 20, 30, 40], 3)
+        assert r[0] is None and r[1] is None
+        assert r[2] == 20  # (10+20+30)/3
+        assert r[3] == 30  # (20+30+40)/3
+
+    def test_janela_maior_que_a_serie_fica_toda_vazia(self):
+        from services.market_data.indicators import rolling_average
+
+        assert rolling_average([10, 20], 30) == [None, None]
+
+    def test_janela_um_devolve_a_propria_serie(self):
+        from services.market_data.indicators import rolling_average
+
+        assert rolling_average([10, 20, 30], 1) == [10, 20, 30]
+
+
 class TestPosicaoNoHistorico:
     def test_maior_preco_fica_no_topo(self):
         assert percentile_position([10, 20, 30, 40], 40) == pytest.approx(87.5)

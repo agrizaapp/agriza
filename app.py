@@ -28,7 +28,8 @@ from services.auth import (
 )
 from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
-from services.market_data import build_market_view
+from services.market_data import build_market_view, price_series
+from services.market_data.indicators import rolling_average
 from services.market_data.sources import available_sources, planned_sources, collect
 from services.market_data.importer import parse_price_csv, importar_linhas
 try:
@@ -3016,6 +3017,31 @@ elif page == "📈 Mercado regional":
             m3.metric("Média curta", money(summary["sma_short"]))
         seta = {"alta": "↑", "baixa": "↓", "estável": "→"}.get(summary["trend"], "—")
         m4.metric("Tendência", f"{seta} {summary['trend']}")
+
+        # A curva é o que torna o percentil compreensível: ver o preço subindo
+        # há meses decide mais do que o número isolado.
+        serie = price_series(analysis_crop, days=180)
+        if len(serie) >= 2:
+            precos_serie = [item["price"] for item in serie]
+            grafico = pd.DataFrame(
+                {"Preço": precos_serie},
+                index=pd.to_datetime([item["date"] for item in serie]),
+            )
+            # Só entra a média que tem dados: série curta não completa a janela
+            # longa, e uma coluna vazia viraria legenda sem linha no gráfico.
+            for rotulo, janela in (("Média curta", 7), ("Média longa", 30)):
+                valores = rolling_average(precos_serie, janela)
+                if any(v is not None for v in valores):
+                    grafico[rotulo] = valores
+            if required_for_crop:
+                grafico["Preço necessário"] = required_for_crop
+            st.line_chart(grafico, use_container_width=True)
+            legenda = "Preço registrado e médias móveis dos últimos meses."
+            if required_for_crop:
+                legenda += (
+                    " A linha reta é o preço que sua safra precisa para bater a margem."
+                )
+            st.caption(legenda)
 
         level_class, level_label = NIVEL_MERCADO.get(signal["level"], ("warning", ""))
         pct_line = ""
