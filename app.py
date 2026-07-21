@@ -28,6 +28,8 @@ from services.auth import (
 )
 from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
+from services.market_data import build_market_view
+from services.market_data.sources import available_sources, planned_sources, collect
 try:
     from market_prices import update_regional_quotes, latest_quote_for_crop
 except ModuleNotFoundError:
@@ -263,7 +265,7 @@ view_pages = [
 ]
 pages = menu_pages + view_pages
 if user["role"] == "admin":
-    menu_pages.append("📦 BACKUP")
+    menu_pages.extend(["👥 Usuários", "📦 BACKUP"])
     pages.extend(["👥 Usuários", "📦 BACKUP"])
 
 if "current_page" not in st.session_state or st.session_state.current_page not in pages:
@@ -459,27 +461,6 @@ if page == "🏠 Início":
                 st.write(
                     f"• **{br_date(item['due_date'])}** — {item['description']} — {money(item['total_value'])}"
                 )
-
-
-elif page == "👁️ Visualizar":
-    st.subheader("O que você quer visualizar?")
-    st.caption("Escolha uma área para consultar lançamentos, indicadores e histórico.")
-    view_options = [
-        ("🌾 Safras", "🌾 Safras"),
-        ("🛒 Compras", "🛒 Compras"),
-        ("💰 Vendas", "💰 Vendas"),
-        ("🚜 Máquinas", "🚜 Máquinas e financiamentos"),
-        ("📈 Mercado", "📈 Mercado regional"),
-    ]
-    if user["role"] == "admin":
-        view_options.append(("👥 Usuários", "👥 Usuários"))
-    for start in range(0, len(view_options), 2):
-        cols = st.columns(2)
-        for offset, (label, destination) in enumerate(view_options[start:start + 2]):
-            with cols[offset]:
-                if st.button(label, key=f"view_{destination}", use_container_width=True):
-                    st.session_state.current_page = destination
-                    st.rerun()
 
 
 elif page == "📝 Lançar / Visualizar":
@@ -1048,6 +1029,16 @@ elif page == "🛒 Compras":
                 0,
             )
 
+            # A safra precisa vir junto: sem ela o compromisso não entra na proteção
+            # da safra nem no cálculo de saldo descoberto do AgroIA.
+            selected_season_label = st.selectbox(
+                "Safra",
+                list(season_map),
+                index=1 if len(season_map) > 1 else 0,
+                key="insumo_season_v31",
+                help="Vincula a compra à safra para entrar na proteção e na recomendação do AgroIA.",
+            )
+
             c3, c4 = st.columns(2)
             purchase_date = c3.date_input(
                 "Data da compra", value=date.today(), format="DD/MM/YYYY", key="insumo_purchase_date_v31"
@@ -1077,6 +1068,8 @@ elif page == "🛒 Compras":
                         "company": company_map[selected_company_name],
                         "product": selected_product,
                         "unit": unit_map[selected_unit_label],
+                        "season_label": selected_season_label,
+                        "season_id": season_map[selected_season_label],
                         "purchase_date": purchase_date,
                         "payment_date": payment_date,
                         "quantity": float(quantity),
@@ -1090,6 +1083,7 @@ elif page == "🛒 Compras":
                 [
                     ("Empresa", draft["company"]["name"]),
                     ("Produto", draft["product"]["name"]),
+                    ("Safra", draft.get("season_label") or "Nenhuma"),
                     ("Data da compra", br_date(draft["purchase_date"])),
                     ("Data do pagamento", br_date(draft["payment_date"])),
                     ("Quantidade", f"{num(draft['quantity'])} {draft['unit']['code']}"),
@@ -1109,8 +1103,8 @@ elif page == "🛒 Compras":
             if cancel_insumo:
                 for key in [
                     "insumo_purchase_review_v31", "insumo_company_v31", "insumo_product_v31",
-                    "insumo_purchase_date_v31", "insumo_payment_date_v31", "insumo_quantity_v31",
-                    "insumo_unit_v31", "insumo_unit_price_v31",
+                    "insumo_season_v31", "insumo_purchase_date_v31", "insumo_payment_date_v31",
+                    "insumo_quantity_v31", "insumo_unit_v31", "insumo_unit_price_v31",
                 ]:
                     st.session_state.pop(key, None)
                 st.session_state.current_page = "📝 Lançar / Visualizar"
@@ -1120,12 +1114,14 @@ elif page == "🛒 Compras":
                     """SELECT id FROM commitments
                        WHERE COALESCE(status,'aberto') != 'cancelado'
                          AND company_id=:company_id AND product_id=:product_id
+                         AND COALESCE(season_id,-1)=COALESCE(:season_id,-1)
                          AND purchase_date=:purchase_date AND due_date=:payment_date
                          AND quantity=:quantity AND unit_price=:unit_price
                        LIMIT 1""",
                     {
                         "company_id": draft["company"]["id"],
                         "product_id": draft["product"]["id"],
+                        "season_id": draft.get("season_id"),
                         "purchase_date": draft["purchase_date"],
                         "payment_date": draft["payment_date"],
                         "quantity": draft["quantity"],
@@ -1137,11 +1133,12 @@ elif page == "🛒 Compras":
                 else:
                     commitment_id = insert_id(
                         """INSERT INTO commitments
-                           (company_id,product_id,unit_id,quantity,unit_price,category,description,
+                           (season_id,company_id,product_id,unit_id,quantity,unit_price,category,description,
                             supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
-                           VALUES(:company_id,:product_id,:unit_id,:quantity,:unit_price,'Insumos',:description,
+                           VALUES(:season_id,:company_id,:product_id,:unit_id,:quantity,:unit_price,'Insumos',:description,
                                   :supplier,:total_value,:purchase_date,:payment_date,'Caixa',:notes,'aberto',:created_by)""",
                         {
+                            "season_id": draft.get("season_id"),
                             "company_id": draft["company"]["id"],
                             "product_id": draft["product"]["id"],
                             "unit_id": draft["unit"]["id"],
@@ -1892,11 +1889,25 @@ elif page == "🚜 Máquinas e financiamentos":
             st.stop()
 
         supplier_map = {company["name"]: company for company in companies}
+        machine_seasons = q("SELECT id,name,crop FROM seasons WHERE active=TRUE ORDER BY id DESC")
+        machine_season_map = {"Nenhuma": None}
+        machine_season_map.update(
+            {f"{item['name']} · {item['crop']}": item["id"] for item in machine_seasons}
+        )
         review = st.session_state.get("machine_purchase_review_v31")
         if not review:
             st.markdown("### Nova máquina")
             model = st.text_input("Modelo da máquina", placeholder="Ex.: Plantadeira 13 linhas", key="machine_model_v31")
             supplier_name = st.selectbox("Fornecedor", list(supplier_map), key="machine_supplier_v31")
+            # As parcelas da máquina também são compromissos da safra: sem o vínculo
+            # elas ficam fora da proteção e da recomendação do AgroIA.
+            machine_season_label = st.selectbox(
+                "Safra que responde pelas parcelas",
+                list(machine_season_map),
+                index=1 if len(machine_season_map) > 1 else 0,
+                key="machine_season_v31",
+                help="Use 'Nenhuma' se as parcelas não devem pesar em nenhuma safra.",
+            )
             machine_mode = st.radio(
                 "Forma de pagamento",
                 ["À vista", "Parcelada", "Financiada"],
@@ -2079,6 +2090,8 @@ elif page == "🚜 Máquinas e financiamentos":
                     st.session_state.machine_purchase_review_v31 = {
                         "model": model.strip(),
                         "supplier": supplier_map[supplier_name],
+                        "season_label": machine_season_label,
+                        "season_id": machine_season_map[machine_season_label],
                         "mode": machine_mode,
                         "purchase_date": purchase_date,
                         "financed_value": float(financed_value),
@@ -2097,6 +2110,7 @@ elif page == "🚜 Máquinas e financiamentos":
                 [
                     ("Modelo", review["model"]),
                     ("Fornecedor", review["supplier"]["name"]),
+                    ("Safra das parcelas", review.get("season_label") or "Nenhuma"),
                     ("Forma de pagamento", review["mode"]),
                     ("Data da compra", br_date(review["purchase_date"])),
                     ("Valor do bem", money(review["financed_value"])),
@@ -2120,7 +2134,7 @@ elif page == "🚜 Máquinas e financiamentos":
                 st.session_state.pop("machine_purchase_review_v31", None)
                 st.rerun()
             if cancel_machine:
-                for key in ["machine_purchase_review_v31", "machine_model_v31", "machine_supplier_v31", "machine_mode_v31"]:
+                for key in ["machine_purchase_review_v31", "machine_model_v31", "machine_supplier_v31", "machine_season_v31", "machine_mode_v31"]:
                     st.session_state.pop(key, None)
                 st.session_state.current_page = "📝 Lançar / Visualizar"
                 st.rerun()
@@ -2158,10 +2172,11 @@ elif page == "🚜 Máquinas e financiamentos":
                     )
                     if float(review.get("entry_value", 0)) > 0:
                         entry_commitment_id = insert_id(
-                            """INSERT INTO commitments(contract_id,installment_no,category,description,supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
-                               VALUES(:contract_id,0,'Máquinas',:description,:supplier,:total_value,:purchase_date,:purchase_date,'Caixa',:notes,'encerrado',:created_by)""",
+                            """INSERT INTO commitments(contract_id,installment_no,season_id,category,description,supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
+                               VALUES(:contract_id,0,:season_id,'Máquinas',:description,:supplier,:total_value,:purchase_date,:purchase_date,'Caixa',:notes,'encerrado',:created_by)""",
                             {
                                 "contract_id": contract_id,
+                                "season_id": review.get("season_id"),
                                 "description": f"{review['model']} · Entrada",
                                 "supplier": review["supplier"]["name"],
                                 "total_value": float(review["entry_value"]),
@@ -2183,9 +2198,9 @@ elif page == "🚜 Máquinas e financiamentos":
                     for row in review["rows"]:
                         status = "encerrado" if review["mode"] == "À vista" else "aberto"
                         commitment_id = insert_id(
-                            """INSERT INTO commitments(contract_id,installment_no,category,description,supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
-                               VALUES(:contract_id,:installment_no,'Máquinas',:description,:supplier,:total_value,:purchase_date,:due_date,'Caixa',:notes,:status,:created_by)""",
-                            {"contract_id": contract_id, "installment_no": row["number"], "description": f"{review['model']} · Parcela {row['number']}", "supplier": review["supplier"]["name"], "total_value": row["value"], "purchase_date": review["purchase_date"], "due_date": row["due_date"], "notes": notes, "status": status, "created_by": user["id"]},
+                            """INSERT INTO commitments(contract_id,installment_no,season_id,category,description,supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
+                               VALUES(:contract_id,:installment_no,:season_id,'Máquinas',:description,:supplier,:total_value,:purchase_date,:due_date,'Caixa',:notes,:status,:created_by)""",
+                            {"contract_id": contract_id, "installment_no": row["number"], "season_id": review.get("season_id"), "description": f"{review['model']} · Parcela {row['number']}", "supplier": review["supplier"]["name"], "total_value": row["value"], "purchase_date": review["purchase_date"], "due_date": row["due_date"], "notes": notes, "status": status, "created_by": user["id"]},
                         )
                         if review["mode"] == "À vista":
                             insert_id(
@@ -3377,6 +3392,107 @@ elif page == "📈 Mercado regional":
                 )
             else:
                 cols[index].metric(crop_name, "Sem cotação")
+
+    # ----- Inteligência de mercado -------------------------------------------
+    st.markdown("### 📊 Inteligência de mercado")
+    st.caption(
+        "Como o preço de cada cultura se comporta ao longo do tempo: posição no "
+        "histórico, médias móveis e tendência. Quanto mais cotações registradas, "
+        "mais rica a leitura."
+    )
+    NIVEL_MERCADO = {
+        "favoravel": ("positive", "🟢 Favorável"),
+        "cautela": ("warning", "🟡 Cautela"),
+        "desfavoravel": ("danger", "🔴 Desfavorável"),
+        "sem_dados": ("warning", "⚪ Sem dados"),
+    }
+    analysis_crop = st.selectbox(
+        "Cultura para analisar", ["Soja", "Milho", "Trigo", "Canola"],
+        key="market_analysis_crop",
+    )
+    required_for_crop = None
+    ref_season = q(
+        """SELECT * FROM seasons
+           WHERE active=TRUE AND lower(crop)=lower(:crop)
+           ORDER BY id DESC LIMIT 1""",
+        {"crop": analysis_crop},
+    )
+    if ref_season:
+        required_for_crop = season_summary(ref_season[0])["required_price"]
+
+    # A camada de mercado é acessória à página: se algo falhar nela, o restante
+    # (cotações, cadastro manual, histórico) precisa continuar funcionando.
+    try:
+        view = build_market_view(analysis_crop, required_for_crop)
+    except Exception:
+        view = None
+        st.warning(
+            "Não foi possível calcular os indicadores de mercado agora. "
+            "As cotações abaixo seguem disponíveis normalmente."
+        )
+
+    summary = view["summary"] if view else {"count": 0}
+    signal = view["signal"] if view else None
+
+    if not view:
+        pass
+    elif summary["count"] < 2:
+        st.info(
+            f"Ainda há poucos registros de {analysis_crop} "
+            f"({summary['count']} cotação(ões)). Registre mais preços — "
+            "manualmente ou por uma fonte — para liberar os indicadores."
+        )
+    else:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Preço atual", money(summary["current"]) + "/sc")
+        if summary["percentile"] is not None:
+            m2.metric("Posição no histórico", f"{num(summary['percentile'], 0)}º pct")
+        if summary["sma_short"] is not None:
+            m3.metric("Média curta", money(summary["sma_short"]))
+        seta = {"alta": "↑", "baixa": "↓", "estável": "→"}.get(summary["trend"], "—")
+        m4.metric("Tendência", f"{seta} {summary['trend']}")
+
+        level_class, level_label = NIVEL_MERCADO.get(signal["level"], ("warning", ""))
+        pct_line = ""
+        if signal.get("suggested_sell_pct"):
+            pct_line = (
+                f"<br><b>Cenário sugerido:</b> avaliar proteção de ~"
+                f"{signal['suggested_sell_pct']}% da produção."
+            )
+        st.markdown(
+            f"""<div class="card {level_class}">
+            <small>LEITURA DE MERCADO · {level_label}</small>
+            <h3>{signal['headline']}</h3>
+            <div>{signal['message']}{pct_line}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+        with st.expander("Ver os fatores considerados"):
+            for factor in signal["factors"]:
+                st.write("•", factor)
+            st.caption(
+                f"Baseado em {summary['count']} cotações dos últimos meses. "
+                "É apoio à decisão sobre venda de grão físico, não recomendação "
+                "de operação financeira — a decisão é sua."
+            )
+
+    with st.expander("🌐 Fontes de dados"):
+        st.caption("Fontes conectadas e planejadas para alimentar a série de preços.")
+        for source in available_sources():
+            fonte_cols = st.columns([3, 1])
+            fonte_cols[0].write(f"**{source.label}** · {source.note}")
+            if CAN_EDIT and fonte_cols[1].button(
+                "Atualizar", key=f"collect_{source.key}", use_container_width=True
+            ):
+                with st.spinner(f"Consultando {source.label}..."):
+                    result = collect(source.key, user_id=user["id"])
+                if result["updated"]:
+                    st.success(f"{len(result['updated'])} cotações atualizadas.")
+                for error in result["errors"]:
+                    st.warning(error)
+                st.rerun()
+        for source in planned_sources():
+            st.write(f"🔜 **{source.label}** · {source.note} _(planejada)_")
 
     if CAN_EDIT:
         with st.expander("✏️ Informar ou corrigir preço", expanded=False):

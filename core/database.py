@@ -35,6 +35,9 @@ def table_columns(table_name):
 
 def add_missing_column(table_name, column_name, definition):
     if column_name not in table_columns(table_name):
+        # sql-dinamico-ok: DDL não aceita parâmetro para nome de tabela/coluna.
+        # Os três valores são constantes internas, escritas no próprio código —
+        # nunca chegam de entrada do usuário.
         ex(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
@@ -205,24 +208,6 @@ def init_db():
             description TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
-        f"""CREATE TABLE IF NOT EXISTS companies(
-            id {id_def},
-            name VARCHAR(180) NOT NULL UNIQUE,
-            notes TEXT,
-            active BOOLEAN NOT NULL DEFAULT TRUE,
-            created_by INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""",
-        f"""CREATE TABLE IF NOT EXISTS products(
-            id {id_def},
-            name VARCHAR(180) NOT NULL,
-            unit_code VARCHAR(12) NOT NULL,
-            notes TEXT,
-            active BOOLEAN NOT NULL DEFAULT TRUE,
-            created_by INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(name, unit_code)
-        )""",
     ]
 
     with engine.begin() as conn:
@@ -278,6 +263,12 @@ def init_db():
     add_missing_column("commitments", "unit_price", "NUMERIC(16,2)")
     add_missing_column("sales", "created_at", timestamp_column)
     add_missing_column("sales", "payment_date", "DATE")
+    # Garante as colunas de catálogo que o aplicativo realmente consulta, caso o
+    # banco tenha nascido de uma versão anterior do esquema.
+    add_missing_column("products", "unit_id", "INTEGER")
+    add_missing_column("companies", "document", "VARCHAR(30)")
+    add_missing_column("companies", "city", "VARCHAR(120)")
+    add_missing_column("companies", "state", "VARCHAR(2)")
     # Mantém os metadados do Mercado Regional compatíveis entre SQLite e PostgreSQL.
     add_missing_column("quotes", "region", "VARCHAR(120)")
     add_missing_column("quotes", "quote_type", "VARCHAR(30)")

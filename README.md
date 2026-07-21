@@ -28,6 +28,15 @@ streamlit run app.py
 
 Sem `DATABASE_URL`, o aplicativo cria/usa `agriza_local.db`. Para PostgreSQL, configure a variável de ambiente antes de iniciar.
 
+## Testes
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests -q
+```
+
+Os testes criam um SQLite temporário próprio e não tocam em nenhum banco existente. Cobrem as regras de safra e proteção de compromissos, o esquema e as migrações aditivas, e a navegação por perfil — incluindo a gravação real de uma compra do formulário até o banco.
+
 ## Deploy no Render
 
 O arquivo `render.yaml` contém a configuração do serviço. Defina `DATABASE_URL` no painel do Render e não apague o banco existente.

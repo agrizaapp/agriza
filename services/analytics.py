@@ -148,6 +148,13 @@ def agroia_recommendation(season):
         f"Compromissos ainda descobertos: {money(uncovered)}.",
     ]
 
+    # Cenário externo: onde o preço está no histórico e para onde aponta.
+    # Enriquece a leitura sem substituir a lógica de pressão de caixa acima.
+    market = _market_context(season["crop"], required)
+    if market:
+        details.append(f"Cenário de mercado: {market['headline'].lower()}.")
+        details.extend(market["factors"][1:])  # o preço atual já consta acima
+
     if quote >= required and sold_pct < 40:
         pct = 10 if uncovered > 0 else 5
         return {
@@ -179,4 +186,25 @@ def agroia_recommendation(season):
         "message": "Sua posição atual pede equilíbrio entre proteção e oportunidade.",
         "details": details,
     }
+
+
+def _market_context(crop, required_price):
+    """Leitura de mercado da cultura, tolerante a ausência de série ou do módulo.
+
+    Nunca deixa a recomendação quebrar: se não houver histórico suficiente ou o
+    módulo não estiver disponível, devolve ``None`` e a recomendação segue só
+    com o cenário interno.
+    """
+    try:
+        from services.market_data import build_market_view
+    except Exception:
+        return None
+    try:
+        view = build_market_view(crop, required_price)
+    except Exception:
+        return None
+    signal = view["signal"]
+    if signal["level"] == "sem_dados" or view["summary"]["count"] < 3:
+        return None
+    return signal
 
