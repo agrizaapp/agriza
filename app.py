@@ -2,6 +2,7 @@ import io
 import json
 import zipfile
 import time
+import calendar
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -1823,8 +1824,11 @@ elif page == "🚜 Máquinas e financiamentos":
             rows = []
             purchase_date = date.today()
             financed_value = 0.0
+            entry_value = 0.0
+            financed_principal = 0.0
             interest_rate = 0.0
             finance_table = None
+            interest_periodicity = None
 
             if machine_mode == "À vista":
                 c1, c2, c3 = st.columns(3)
@@ -1859,68 +1863,90 @@ elif page == "🚜 Máquinas e financiamentos":
                     rows.append({"number": index + 1, "due_date": due_date_value, "value": float(installment_value)})
 
             else:
+                st.markdown("#### Dados do financiamento")
                 c1, c2, c3 = st.columns(3)
                 purchase_date = c1.date_input("Data da compra", value=date.today(), format="DD/MM/YYYY", key="machine_financed_date_v31")
-                financed_value = c2.number_input("Valor do bem financiado (R$)", min_value=0.0, step=1000.0, key="machine_financed_value_v31")
-                years = c3.number_input("Anos para pagar", min_value=1, max_value=30, value=3, step=1, key="machine_financed_years_v31")
-                c4, c5 = st.columns(2)
-                interest_rate = c4.number_input("Taxa de juros anual (%)", min_value=0.0, value=10.0, step=0.1, key="machine_financed_rate_v31")
-                finance_table = c5.selectbox("Tabela", ["SAC", "Price"], key="machine_financed_table_v31")
-                calculation_signature = (purchase_date, float(financed_value), int(years), float(interest_rate), finance_table)
-                if st.session_state.get("machine_financed_signature_v31") != calculation_signature:
-                    for index in range(30):
-                        st.session_state.pop(f"machine_financed_due_v31_{index}", None)
-                        st.session_state.pop(f"machine_financed_value_v31_{index}", None)
-                    st.session_state.machine_financed_signature_v31 = calculation_signature
+                financed_value = c2.number_input("Valor do bem (R$)", min_value=0.0, step=1000.0, key="machine_financed_value_v31")
+                entry_value = c3.number_input("Entrada (R$)", min_value=0.0, step=1000.0, key="machine_financed_entry_v31")
 
-                balance = float(financed_value)
+                c4, c5, c6 = st.columns(3)
+                years = c4.number_input("Anos para pagar", min_value=1, max_value=30, value=3, step=1, key="machine_financed_years_v31")
+                interest_rate = c5.number_input("Taxa de juros (%)", min_value=0.0, value=10.0, step=0.1, key="machine_financed_rate_v31")
+                interest_periodicity = c6.selectbox(
+                    "Periodicidade dos juros",
+                    ["Mensal", "Trimestral", "Semestral", "Anual"],
+                    index=3,
+                    key="machine_financed_periodicity_v31",
+                )
+
+                periodicity_config = {
+                    "Mensal": (1, 12),
+                    "Trimestral": (3, 4),
+                    "Semestral": (6, 2),
+                    "Anual": (12, 1),
+                }
+                interval_months, periods_per_year = periodicity_config[interest_periodicity]
+                count = int(years) * periods_per_year
+                c7, c8 = st.columns(2)
+                finance_table = c7.selectbox("Tabela", ["SAC", "Price"], key="machine_financed_table_v31")
+                first_due_date = c8.date_input(
+                    "Primeiro vencimento",
+                    value=purchase_date + timedelta(days=30 * interval_months),
+                    format="DD/MM/YYYY",
+                    key="machine_financed_first_due_v31",
+                    help="As próximas datas serão calculadas automaticamente a partir deste vencimento.",
+                )
+
+                financed_principal = max(float(financed_value) - float(entry_value), 0)
+                balance = financed_principal
                 rate = float(interest_rate) / 100
-                count = int(years)
                 fixed_payment = (
                     balance * rate / (1 - (1 + rate) ** -count)
                     if finance_table == "Price" and rate > 0 else balance / count
                 ) if count else 0.0
-                st.markdown("#### Parcelas calculadas — você pode ajustar os valores")
-                st.caption("As datas são o aniversário anual da data de compra. Em SAC, a amortização é constante e os juros incidem sobre o saldo devedor inicial de cada ano.")
+                st.markdown("#### Parcelas calculadas")
+                st.caption(
+                    "Valores e datas são automáticos. Para alterar o calendário, ajuste somente o primeiro vencimento acima. "
+                    "No SAC, a amortização é constante; na Price, as parcelas são iguais."
+                )
+                schedule_preview = []
                 for index in range(count):
                     opening_balance = balance
-                    try:
-                        calculated_due_date = purchase_date.replace(year=purchase_date.year + index + 1)
-                    except ValueError:
-                        calculated_due_date = purchase_date.replace(year=purchase_date.year + index + 1, day=28)
+                    month_index = first_due_date.month - 1 + interval_months * index
+                    due_year = first_due_date.year + month_index // 12
+                    due_month = month_index % 12 + 1
+                    due_day = min(first_due_date.day, calendar.monthrange(due_year, due_month)[1])
+                    calculated_due_date = date(due_year, due_month, due_day)
                     interest = opening_balance * rate
                     if finance_table == "SAC":
-                        amortization = min(float(financed_value) / count, opening_balance)
+                        amortization = min(financed_principal / count, opening_balance)
                         calculated_value = amortization + interest
                     else:
                         calculated_value = fixed_payment
                         amortization = calculated_value - interest
                         amortization = min(amortization, opening_balance)
                     balance = max(opening_balance - amortization, 0)
-                    p1, p2, p3, p4 = st.columns(4)
-                    p1.markdown(f"**Parcela {index + 1}**\n\nCalculada: **{money(calculated_value)}**")
-                    due_date_value = p2.date_input(
-                        "Vencimento",
-                        value=calculated_due_date,
-                        format="DD/MM/YYYY",
-                        key=f"machine_financed_due_v31_{index}",
+                    rows.append({"number": index + 1, "due_date": calculated_due_date, "value": round(calculated_value, 2)})
+                    schedule_preview.append(
+                        {
+                            "Parcela": index + 1,
+                            "Vencimento": br_date(calculated_due_date),
+                            "Amortização": money(amortization),
+                            "Juros": money(interest),
+                            "Valor": money(calculated_value),
+                            "Saldo devedor": money(balance),
+                        }
                     )
-                    installment_value = p3.number_input(
-                        "Valor da parcela (R$)",
-                        min_value=0.0,
-                        value=round(calculated_value, 2),
-                        step=100.0,
-                        key=f"machine_financed_value_v31_{index}",
-                    )
-                    p4.caption(f"Juros: {money(interest)}\n\nSaldo: {money(balance)}")
-                    rows.append({"number": index + 1, "due_date": due_date_value, "value": float(installment_value)})
-                total_with_interest = sum(row["value"] for row in rows)
-                s1, s2, s3 = st.columns(3)
-                s1.metric("Valor financiado", money(financed_value))
-                s2.metric("Total de juros", money(max(total_with_interest - float(financed_value), 0)))
-                s3.metric("Total com juros", money(total_with_interest))
+                st.dataframe(pd.DataFrame(schedule_preview), use_container_width=True, hide_index=True)
+                financing_total = sum(row["value"] for row in rows)
+                s1, s2, s3, s4 = st.columns(4)
+                s1.metric("Valor do bem", money(financed_value))
+                s2.metric("Entrada", money(entry_value))
+                s3.metric("Saldo financiado", money(financed_principal))
+                s4.metric("Total de juros", money(max(financing_total - financed_principal, 0)))
+                st.metric("Total da operação com juros", money(float(entry_value) + financing_total))
 
-            total_due = sum(row["value"] for row in rows)
+            total_due = sum(row["value"] for row in rows) + float(entry_value)
             action_review, action_cancel = st.columns(2)
             review_operation = action_review.button("🔎 Conferir operação", key="review_machine_purchase_v31", use_container_width=True, type="primary")
             cancel_operation = action_cancel.button("↩️ Cancelar e voltar", key="cancel_machine_before_review_v31", use_container_width=True)
@@ -1930,6 +1956,8 @@ elif page == "🚜 Máquinas e financiamentos":
             if review_operation:
                 if not model.strip():
                     st.error("Informe o modelo da máquina.")
+                elif machine_mode == "Financiada" and entry_value >= financed_value:
+                    st.error("A entrada deve ser menor que o valor do bem.")
                 elif financed_value <= 0 or not rows or any(row["value"] <= 0 for row in rows):
                     st.error("Confira o valor da máquina e todas as parcelas.")
                 else:
@@ -1939,8 +1967,11 @@ elif page == "🚜 Máquinas e financiamentos":
                         "mode": machine_mode,
                         "purchase_date": purchase_date,
                         "financed_value": float(financed_value),
+                        "entry_value": float(entry_value),
+                        "financed_principal": float(financed_principal),
                         "interest_rate": float(interest_rate),
                         "finance_table": finance_table,
+                        "interest_periodicity": interest_periodicity,
                         "total_due": float(total_due),
                         "rows": rows,
                     }
@@ -1954,7 +1985,10 @@ elif page == "🚜 Máquinas e financiamentos":
                     ("Forma de pagamento", review["mode"]),
                     ("Data da compra", br_date(review["purchase_date"])),
                     ("Valor do bem", money(review["financed_value"])),
+                    ("Entrada", money(review.get("entry_value", 0))),
+                    ("Saldo financiado", money(review.get("financed_principal", review["financed_value"]))),
                     ("Tabela", review["finance_table"] or "Não se aplica"),
+                    ("Periodicidade", review.get("interest_periodicity") or "Não se aplica"),
                     ("Juros totais", money(max(review["total_due"] - review["financed_value"], 0))),
                 ],
                 "Total a pagar",
@@ -1990,7 +2024,12 @@ elif page == "🚜 Máquinas e financiamentos":
                 else:
                     notes = (
                         f"{review['mode']}"
-                        + (f" · {review['finance_table']} · juros {review['interest_rate']:.2f}% a.a." if review["finance_table"] else "")
+                        + (
+                            f" · Entrada {money(review.get('entry_value', 0))}"
+                            f" · {review['finance_table']} · juros {review['interest_rate']:.2f}%"
+                            f" · {review.get('interest_periodicity') or ''}"
+                            if review["finance_table"] else ""
+                        )
                     )
                     contract_id = insert_id(
                         """INSERT INTO purchase_contracts(description,supplier,category,total_value,purchase_date,notes,status,created_by)
@@ -2002,6 +2041,30 @@ elif page == "🚜 Máquinas e financiamentos":
                            VALUES(:n,:m,:d,:v,:c,'ativo',:o,:u)""",
                         {"n": review["model"], "m": review["model"], "d": review["purchase_date"], "v": review["financed_value"], "c": contract_id, "o": notes, "u": user["id"]},
                     )
+                    if float(review.get("entry_value", 0)) > 0:
+                        entry_commitment_id = insert_id(
+                            """INSERT INTO commitments(contract_id,installment_no,category,description,supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
+                               VALUES(:contract_id,0,'Máquinas',:description,:supplier,:total_value,:purchase_date,:purchase_date,'Caixa',:notes,'encerrado',:created_by)""",
+                            {
+                                "contract_id": contract_id,
+                                "description": f"{review['model']} · Entrada",
+                                "supplier": review["supplier"]["name"],
+                                "total_value": float(review["entry_value"]),
+                                "purchase_date": review["purchase_date"],
+                                "notes": notes,
+                                "created_by": user["id"],
+                            },
+                        )
+                        insert_id(
+                            """INSERT INTO payments(commitment_id,payment_date,amount,notes,created_by)
+                               VALUES(:commitment_id,:payment_date,:amount,'Entrada da compra',:created_by)""",
+                            {
+                                "commitment_id": entry_commitment_id,
+                                "payment_date": review["purchase_date"],
+                                "amount": float(review["entry_value"]),
+                                "created_by": user["id"],
+                            },
+                        )
                     for row in review["rows"]:
                         status = "encerrado" if review["mode"] == "À vista" else "aberto"
                         commitment_id = insert_id(
@@ -2053,6 +2116,28 @@ elif page == "🚜 Máquinas e financiamentos":
                 "preenchidas por você; as demais opções fazem a simulação automática."
             ),
         )
+        legacy_installment_count = st.number_input(
+            "Quantidade de parcelas",
+            min_value=1,
+            max_value=240 if finance_table != "Manual" else 20,
+            value=max(int(default_count), 1),
+            step=1,
+            key="machine_installment_count_v103",
+            help="Ao alterar esta quantidade, os campos das parcelas abaixo são atualizados imediatamente.",
+        )
+        legacy_has_entry = st.checkbox(
+            "A compra possui entrada",
+            key="machine_has_entry_v103",
+        )
+        legacy_entry_value = (
+            st.number_input(
+                "Valor da entrada (R$)",
+                min_value=0.0,
+                step=1000.0,
+                key="machine_entry_value_v103",
+            )
+            if legacy_has_entry else 0.0
+        )
 
         with st.form("machine_financing_v102", clear_on_submit=False):
             m1, m2 = st.columns(2)
@@ -2100,16 +2185,11 @@ elif page == "🚜 Máquinas e financiamentos":
             first_due_date = date.today()
             interval_months = 1
             financed_value = float(total_value)
+            installment_count = int(legacy_installment_count)
+            entry_value = float(legacy_entry_value)
 
             if finance_table == "Manual":
-                st.caption("Informe cada parcela manualmente, como já é feito hoje.")
-                installment_count = st.number_input(
-                    "Quantas parcelas serão pagas?",
-                    min_value=1,
-                    max_value=20,
-                    value=default_count,
-                    step=1,
-                )
+                st.caption("Informe cada parcela manualmente. A quantidade selecionada acima aparece imediatamente abaixo.")
             else:
                 table_descriptions = {
                     "SAC": "SAC: a amortização é constante e as parcelas diminuem ao longo do prazo.",
@@ -2126,13 +2206,7 @@ elif page == "🚜 Máquinas e financiamentos":
                     step=1000.0,
                     help="Valor que será usado no cálculo das parcelas. Pode ser diferente do valor total do bem caso exista entrada.",
                 )
-                installment_count = f2.number_input(
-                    "Prazo (número de parcelas)",
-                    min_value=1,
-                    max_value=240,
-                    value=max(int(default_count), 1),
-                    step=1,
-                )
+                f2.metric("Prazo", f"{installment_count} parcela(s)")
                 f3, f4, f5 = st.columns(3)
                 interest_rate = f3.number_input(
                     "Taxa de juros por período (%)",
@@ -2150,7 +2224,7 @@ elif page == "🚜 Máquinas e financiamentos":
                 )
                 st.caption(
                     f"Simulação: {int(installment_count)} parcelas, juros de {interest_rate:.2f}% por período "
-                    f"sobre {money(financed_value)}."
+                    f"sobre {money(financed_value)} · entrada de {money(entry_value)}."
                 )
 
             example_dates = [
@@ -2255,12 +2329,19 @@ elif page == "🚜 Máquinas e financiamentos":
                 st.error("Informe o nome da máquina.")
             elif total_value <= 0:
                 st.error("Informe o valor total da compra.")
+            elif entry_value < 0 or entry_value >= total_value:
+                st.error("A entrada deve ser menor que o valor total da compra.")
             elif len(valid_rows) != int(installment_count):
                 st.error("Preencha o valor de todas as parcelas.")
-            elif finance_table == "Manual" and abs(installment_sum - total_value) > 0.01:
+            elif finance_table == "Manual" and abs(installment_sum - (total_value - entry_value)) > 0.01:
                 st.error(
                     f"A soma das parcelas é {money(installment_sum)}, "
-                    f"mas o valor total da compra é {money(total_value)}."
+                    f"mas o saldo após a entrada é {money(total_value - entry_value)}."
+                )
+            elif finance_table != "Manual" and abs(financed_value - (total_value - entry_value)) > 0.01:
+                st.error(
+                    f"O valor financiado deve ser igual ao valor da compra menos a entrada: "
+                    f"{money(total_value - entry_value)}."
                 )
             else:
                 st.session_state.machine_draft_v103 = {
@@ -2271,10 +2352,11 @@ elif page == "🚜 Máquinas e financiamentos":
                     "year": int(machine_year),
                     "purchase_date": purchase_date,
                     "total_value": float(total_value),
+                    "entry_value": entry_value,
                     "notes": (
                         notes.strip()
                         + (
-                            f" · Tabela: {finance_table} · Financiado: {money(financed_value)} "
+                            f" · Entrada: {money(entry_value)} · Tabela: {finance_table} · Financiado: {money(financed_value)} "
                             f"· Juros: {interest_rate:.2f}% por período"
                             if finance_table != "Manual"
                             else ""
@@ -2293,6 +2375,7 @@ elif page == "🚜 Máquinas e financiamentos":
                     ("Fornecedor", d["supplier"] or "Não informado"),
                     ("Marca/modelo", f"{d['brand'] or '—'} {d['model'] or ''}".strip()),
                     ("Data da compra", d["purchase_date"].strftime("%d/%m/%Y")),
+                    ("Entrada", money(d.get("entry_value", 0))),
                     ("Quantidade de parcelas", len(d["rows"])),
                 ],
                 "Valor total",
@@ -2375,6 +2458,35 @@ elif page == "🚜 Máquinas e financiamentos":
                             "u": user["id"],
                         },
                     )
+                    if float(d.get("entry_value", 0)) > 0:
+                        entry_commitment_id = insert_id(
+                            """INSERT INTO commitments
+                               (contract_id,installment_no,season_id,category,
+                                description,supplier,total_value,purchase_date,
+                                due_date,payment_crop,notes,status,created_by)
+                               VALUES(:ct,0,NULL,'Máquinas',:d,:f,:v,:pd,
+                                      :pd,'Caixa',:n,'encerrado',:u)""",
+                            {
+                                "ct": contract_id,
+                                "d": f"{d['machine_name']} · Entrada",
+                                "f": d["supplier"],
+                                "v": float(d["entry_value"]),
+                                "pd": d["purchase_date"],
+                                "n": d["notes"],
+                                "u": user["id"],
+                            },
+                        )
+                        insert_id(
+                            """INSERT INTO payments
+                               (commitment_id,payment_date,amount,notes,created_by)
+                               VALUES(:c,:d,:a,'Entrada da compra',:u)""",
+                            {
+                                "c": entry_commitment_id,
+                                "d": d["purchase_date"],
+                                "a": float(d["entry_value"]),
+                                "u": user["id"],
+                            },
+                        )
                     for row in d["rows"]:
                         insert_id(
                             """INSERT INTO commitments
