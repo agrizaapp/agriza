@@ -92,10 +92,68 @@ class TestCamposDeSafraNosLancamentos:
         assert linhas[0]["category"] == "Insumos"
 
 
+class TestPaginaMaquinas:
+    """A remoção do 'Financiamento avançado' não pode levar junto a listagem."""
+
+    @pytest.fixture(autouse=True)
+    def maquina(self, banco_limpo):
+        from core.database import insert_id
+
+        insert_id("INSERT INTO companies(name) VALUES('Fornecedor X')", {})
+        contrato = insert_id(
+            """INSERT INTO purchase_contracts(description,supplier,category,total_value,status)
+               VALUES('Trator','Fornecedor X','Máquinas',300000,'aberto')""",
+            {},
+        )
+        insert_id(
+            """INSERT INTO machinery(name,model,contract_id,status)
+               VALUES('Trator','Trator X',:c,'ativo')""",
+            {"c": contrato},
+        )
+
+    def test_lista_maquinas_cadastradas(self):
+        at = _abrir("admin", "🚜 Máquinas e financiamentos",
+                    machine_screen_v31="📋 Máquinas cadastradas")
+        texto = " ".join(str(m.value) for m in at.markdown)
+        assert "Trator" in texto
+
+    def test_nao_existe_mais_aba_de_financiamento_avancado(self):
+        at = _abrir("admin", "🚜 Máquinas e financiamentos",
+                    machine_screen_v31="📋 Máquinas cadastradas")
+        rotulos = " ".join(str(m.value) for m in at.markdown)
+        assert "Financiamento avançado" not in rotulos
+
+
 class TestPaginaMercado:
     def test_renderiza_sem_dados(self, banco_limpo):
         at = _abrir("admin", "📈 Mercado regional")
         assert any("Inteligência de mercado" in str(m.value) for m in at.markdown)
+
+    def test_importacao_disponivel_para_quem_edita(self, banco_limpo):
+        at = _abrir("admin", "📈 Mercado regional")
+        assert any("Importar histórico" in str(e.label) for e in at.expander)
+
+    def test_importacao_oculta_para_perfil_consulta(self, banco_limpo):
+        at = _abrir("consulta", "📈 Mercado regional")
+        assert not any("Importar histórico" in str(e.label) for e in at.expander)
+
+    def test_serie_importada_aparece_no_painel(self, banco_limpo):
+        """Fecha o ciclo: planilha entra, indicadores saem."""
+        from services.market_data.importer import importar_linhas, parse_price_csv
+
+        csv_texto = "Data;Cultura;Preço\n" + "\n".join(
+            f"{dia:02d}/03/2026;Soja;{preco},00"
+            for dia, preco in zip(range(1, 8), [90, 95, 100, 105, 110, 115, 120])
+        )
+        linhas, erros = parse_price_csv(csv_texto.encode("utf-8"),
+                                        culturas_validas=["Soja"])
+        assert erros == []
+        assert importar_linhas(linhas, user_id=1)["gravadas"] == 7
+
+        at = _abrir("admin", "📈 Mercado regional", market_analysis_crop="Soja")
+        rotulos = [m.label for m in at.metric]
+        assert "Posição no histórico" in rotulos
+        assert "Tendência" in rotulos
 
     def test_painel_com_serie_mostra_indicadores(self, banco_limpo):
         from services.market_data.history import record_quote

@@ -30,6 +30,7 @@ from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
 from services.market_data import build_market_view
 from services.market_data.sources import available_sources, planned_sources, collect
+from services.market_data.importer import parse_price_csv, importar_linhas
 try:
     from market_prices import update_regional_quotes, latest_quote_for_crop
 except ModuleNotFoundError:
@@ -2214,539 +2215,103 @@ elif page == "🚜 Máquinas e financiamentos":
                     st.rerun()
         st.stop()
 
-    tab_list, tab_new = st.tabs(
-        ["📋 Máquinas cadastradas", "🧮 Financiamento avançado"]
+    machines = q(
+        """SELECT m.*,pc.description AS contract_description,
+                  pc.total_value AS contract_total
+           FROM machinery m
+           LEFT JOIN purchase_contracts pc ON pc.id=m.contract_id
+           WHERE COALESCE(m.status,'ativo')!='excluido'
+           ORDER BY m.id DESC"""
     )
 
-    with tab_new:
-        st.markdown("### 1. Dados da máquina")
-
-        use_planter = st.checkbox(
-            "Usar o exemplo da minha plantadeira",
-            value=True,
-            key="machine_planter_example_v102",
-        )
-
-        if use_planter:
-            default_machine_name = "Plantadeira"
-            default_contract_value = 405000.0
-            default_count = 4
-        else:
-            default_machine_name = ""
-            default_contract_value = 0.0
-            default_count = 1
-
-        st.markdown("### Tipo de financiamento")
-        finance_table = st.selectbox(
-            "Tabela de financiamento",
-            ["Manual", "SAC", "Price", "Americana"],
-            key="machine_finance_table_v103",
-            help=(
-                "A seleção atualiza imediatamente os campos abaixo. Manual mantém as parcelas "
-                "preenchidas por você; as demais opções fazem a simulação automática."
-            ),
-        )
-        legacy_installment_count = st.number_input(
-            "Quantidade de parcelas",
-            min_value=1,
-            max_value=240 if finance_table != "Manual" else 20,
-            value=max(int(default_count), 1),
-            step=1,
-            key="machine_installment_count_v103",
-            help="Ao alterar esta quantidade, os campos das parcelas abaixo são atualizados imediatamente.",
-        )
-        legacy_has_entry = st.checkbox(
-            "A compra possui entrada",
-            key="machine_has_entry_v103",
-        )
-        legacy_entry_value = (
-            currency_input(
-                st,
-                "Valor da entrada (R$)",
-                min_value=0.0,
-                step=1000.0,
-                key="machine_entry_value_v103",
-            )
-            if legacy_has_entry else 0.0
-        )
-
-        with st.form("machine_financing_v102", clear_on_submit=False):
-            m1, m2 = st.columns(2)
-            machine_name = m1.text_input(
-                "Nome da máquina ou implemento",
-                value=default_machine_name,
-                placeholder="Ex.: Plantadeira 13 linhas",
-            )
-            supplier = m2.text_input(
-                "Fornecedor / vendedor",
-                placeholder="Ex.: Agro Máquinas",
-            )
-
-            m3, m4, m5 = st.columns(3)
-            brand = m3.text_input("Marca")
-            model = m4.text_input("Modelo")
-            machine_year = m5.number_input(
-                "Ano",
-                min_value=1950,
-                max_value=2100,
-                value=date.today().year,
-                step=1,
-            )
-
-            m6, m7 = st.columns(2)
-            purchase_date = m6.date_input(
-                "Data da compra",
-                value=date.today(),
-                format="DD/MM/YYYY",
-            )
-            total_value = currency_input(
-                m7,
-                "Valor total da compra (R$)",
-                min_value=0.0,
-                value=default_contract_value,
-                step=1000.0,
-            )
-
-            notes = st.text_area(
-                "Observações",
-                value="Entrada mais 3 parcelas anuais" if use_planter else "",
-            )
-
-            st.markdown("### 2. Parcelas do financiamento")
-            interest_rate = 0.0
-            first_due_date = date.today()
-            interval_months = 1
-            financed_value = float(total_value)
-            installment_count = int(legacy_installment_count)
-            entry_value = float(legacy_entry_value)
-
-            if finance_table == "Manual":
-                st.caption("Informe cada parcela manualmente. A quantidade selecionada acima aparece imediatamente abaixo.")
-            else:
-                table_descriptions = {
-                    "SAC": "SAC: a amortização é constante e as parcelas diminuem ao longo do prazo.",
-                    "Price": "Price: as parcelas têm valor fixo durante todo o financiamento.",
-                    "Americana": "Americana: são pagos juros por período e o principal é quitado na última parcela.",
-                }
-                st.info(table_descriptions[finance_table])
-                st.markdown(f"#### Simular financiamento pela tabela {finance_table}")
-                f1, f2 = st.columns(2)
-                financed_value = currency_input(
-                    f1,
-                    "Valor financiado (R$)",
-                    min_value=0.01,
-                    value=max(float(total_value) - float(entry_value), 0.01),
-                    step=1000.0,
-                    help="Valor que será usado no cálculo das parcelas. Pode ser diferente do valor total do bem caso exista entrada.",
-                )
-                f2.metric("Prazo", f"{installment_count} parcela(s)")
-                f3, f4, f5 = st.columns(3)
-                interest_rate = f3.number_input(
-                    "Taxa de juros por período (%)",
-                    min_value=0.0,
-                    value=1.0,
-                    step=0.1,
-                )
-                first_due_date = f4.date_input(
-                    "Primeiro vencimento",
-                    value=add_months(date.today(), 1),
-                    format="DD/MM/YYYY",
-                )
-                interval_months = f5.number_input(
-                    "Periodicidade (meses)", min_value=1, max_value=24, value=1
-                )
-                st.caption(
-                    f"Simulação: {int(installment_count)} parcelas, juros de {interest_rate:.2f}% por período "
-                    f"sobre {money(financed_value)} · entrada de {money(entry_value)}."
-                )
-
-            example_dates = [
-                date(2026, 11, 20),
-                date(2027, 5, 20),
-                date(2028, 5, 20),
-                date(2029, 5, 20),
-            ]
-            example_values = [60000.0, 115000.0, 115000.0, 115000.0]
-            example_crops = ["Trigo", "Soja", "Soja", "Soja"]
-
-            rows = []
-            if finance_table == "Manual":
-                for index in range(int(installment_count)):
-                    st.markdown(f"#### Parcela {index + 1}")
-                    p1, p2, p3 = st.columns(3)
-
-                    if use_planter and index < 4:
-                        due_default = example_dates[index]
-                        value_default = example_values[index]
-                        crop_default = example_crops[index]
-                    else:
-                        due_default = date.today()
-                        value_default = 0.0
-                        crop_default = "Caixa"
-
-                    due_date_value = p1.date_input(
-                        "Vencimento", value=due_default, format="DD/MM/YYYY",
-                        key=f"machine_due_v102_{index}",
-                    )
-                    installment_value = currency_input(
-                        p2,
-                        "Valor da parcela (R$)", min_value=0.0,
-                        value=value_default, step=1000.0,
-                        key=f"machine_value_v102_{index}",
-                    )
-                    payment_crop_value = p3.selectbox(
-                        "Será paga com", payment_options,
-                        index=payment_options.index(crop_default) if crop_default in payment_options else 0,
-                        key=f"machine_crop_v102_{index}",
-                    )
-                    rows.append({"number": index + 1, "due_date": due_date_value,
-                                 "value": installment_value, "crop": payment_crop_value})
-            else:
-                balance = float(financed_value)
-                rate = float(interest_rate) / 100
-                count = int(installment_count)
-                fixed_payment = (
-                    balance * rate / (1 - (1 + rate) ** -count)
-                    if finance_table == "Price" and rate > 0 else balance / count
-                )
-                schedule_preview = []
-                total_amortization = 0.0
-                total_interest = 0.0
-                total_installments = 0.0
-                for index in range(count):
-                    interest = balance * rate
-                    if finance_table == "SAC":
-                        amortization = float(financed_value) / count
-                        installment_value = amortization + interest
-                    elif finance_table == "Americana":
-                        amortization = balance if index == count - 1 else 0
-                        installment_value = interest + amortization
-                    else:  # Price
-                        installment_value = fixed_payment
-                        amortization = installment_value - interest
-                    amortization = min(amortization, balance)
-                    balance = max(balance - amortization, 0)
-                    total_amortization += amortization
-                    total_interest += interest
-                    total_installments += installment_value
-                    due_date_value = add_months(first_due_date, int(interval_months) * index)
-                    rows.append({"number": index + 1, "due_date": due_date_value,
-                                 "value": round(installment_value, 2), "crop": "Caixa"})
-                    schedule_preview.append({
-                        "Parcela": index + 1,
-                        "Vencimento": br_date(due_date_value),
-                        "Amortização": money(amortization),
-                        "Juros": money(interest),
-                        "Valor": money(installment_value),
-                        "Saldo devedor": money(balance),
-                    })
-                schedule_preview.append({
-                    "Parcela": "Total",
-                    "Vencimento": "—",
-                    "Amortização": money(total_amortization),
-                    "Juros": money(total_interest),
-                    "Valor": money(total_installments),
-                    "Saldo devedor": money(balance),
-                })
-                st.dataframe(pd.DataFrame(schedule_preview), use_container_width=True, hide_index=True)
-
-            submitted = st.form_submit_button(
-                "✅ Salvar máquina e parcelas",
-                use_container_width=True,
-            )
-
-        if submitted:
-            valid_rows = [row for row in rows if float(row["value"] or 0) > 0]
-            installment_sum = sum(float(row["value"]) for row in valid_rows)
-
-            if not machine_name.strip():
-                st.error("Informe o nome da máquina.")
-            elif total_value <= 0:
-                st.error("Informe o valor total da compra.")
-            elif entry_value < 0 or entry_value >= total_value:
-                st.error("A entrada deve ser menor que o valor total da compra.")
-            elif len(valid_rows) != int(installment_count):
-                st.error("Preencha o valor de todas as parcelas.")
-            elif finance_table == "Manual" and abs(installment_sum - (total_value - entry_value)) > 0.01:
-                st.error(
-                    f"A soma das parcelas é {money(installment_sum)}, "
-                    f"mas o saldo após a entrada é {money(total_value - entry_value)}."
-                )
-            elif finance_table != "Manual" and abs(financed_value - (total_value - entry_value)) > 0.01:
-                st.error(
-                    f"O valor financiado deve ser igual ao valor da compra menos a entrada: "
-                    f"{money(total_value - entry_value)}."
-                )
-            else:
-                st.session_state.machine_draft_v103 = {
-                    "machine_name": machine_name.strip(),
-                    "supplier": supplier.strip(),
-                    "brand": brand.strip(),
-                    "model": model.strip(),
-                    "year": int(machine_year),
-                    "purchase_date": purchase_date,
-                    "total_value": float(total_value),
-                    "entry_value": entry_value,
-                    "notes": (
-                        notes.strip()
-                        + (
-                            f" · Entrada: {money(entry_value)} · Tabela: {finance_table} · Financiado: {money(financed_value)} "
-                            f"· Juros: {interest_rate:.2f}% por período"
-                            if finance_table != "Manual"
-                            else ""
-                        )
-                    ).strip(" ·"),
-                    "rows": valid_rows,
-                }
-
-        d = st.session_state.get("machine_draft_v103")
-        if d:
-            st.markdown("---")
-            confirmation_card(
-                "🚜 Confirme a máquina e as parcelas",
-                [
-                    ("Máquina", d["machine_name"]),
-                    ("Fornecedor", d["supplier"] or "Não informado"),
-                    ("Marca/modelo", f"{d['brand'] or '—'} {d['model'] or ''}".strip()),
-                    ("Data da compra", d["purchase_date"].strftime("%d/%m/%Y")),
-                    ("Entrada", money(d.get("entry_value", 0))),
-                    ("Quantidade de parcelas", len(d["rows"])),
-                ],
-                "Valor total",
-                money(d["total_value"]),
-            )
-            for row in d["rows"]:
+    if not machines:
+        st.info("Nenhuma máquina cadastrada.")
+    else:
+        for machine in machines:
+            with st.expander(f"🚜 {machine['name']}", expanded=False):
                 st.write(
-                    f"**Parcela {row['number']}** — "
-                    f"{row['due_date'].strftime('%d/%m/%Y')} — "
-                    f"{money(row['value'])} — pagar com **{row['crop']}**"
+                    f"**Marca/modelo:** "
+                    f"{machine.get('brand') or '—'} "
+                    f"{machine.get('model') or ''}"
+                )
+                st.write(
+                    f"**Valor da compra:** "
+                    f"{money(machine.get('contract_total') or machine.get('acquisition_value') or 0)}"
+                )
+                a1, a2, a3 = st.columns(3)
+                if a1.button("👁️ Visualizar", key=f"view_machine_{machine['id']}"):
+                    st.info(
+                        f"Aquisição em {br_date(machine.get('acquisition_date'))}; "
+                        f"status: {machine.get('status') or 'ativo'}."
+                    )
+                if CAN_EDIT and a2.button("✏️ Editar", key=f"open_edit_machine_{machine['id']}"):
+                    st.session_state[f"edit_machine_{machine['id']}"] = True
+                if CAN_EDIT and a3.button("🗑️ Excluir", key=f"delete_machine_{machine['id']}"):
+                    st.session_state[f"confirm_delete_machine_{machine['id']}"] = True
+
+                if st.session_state.get(f"edit_machine_{machine['id']}"):
+                    with st.form(f"machine_edit_form_{machine['id']}"):
+                        em1, em2 = st.columns(2)
+                        edit_machine_name = em1.text_input("Nome", value=machine.get("name") or "")
+                        edit_machine_brand = em2.text_input("Marca", value=machine.get("brand") or "")
+                        em3, em4 = st.columns(2)
+                        edit_machine_model = em3.text_input("Modelo", value=machine.get("model") or "")
+                        edit_machine_year = em4.number_input("Ano", min_value=1950, max_value=2100, value=int(machine.get("year") or date.today().year))
+                        edit_machine_notes = st.text_area("Observação", value=machine.get("notes") or "")
+                        save_machine_edit = st.form_submit_button("Salvar alterações")
+                    if save_machine_edit:
+                        ex("""UPDATE machinery SET name=:n,brand=:b,model=:m,year=:y,notes=:o WHERE id=:id""",
+                           {"n": edit_machine_name.strip(), "b": edit_machine_brand.strip(), "m": edit_machine_model.strip(), "y": edit_machine_year, "o": edit_machine_notes.strip(), "id": machine["id"]})
+                        log_action(user["id"], "editou", "máquina", machine["id"], edit_machine_name.strip())
+                        st.session_state.pop(f"edit_machine_{machine['id']}", None)
+                        st.success("Máquina atualizada.")
+                        st.rerun()
+
+                if st.session_state.get(f"confirm_delete_machine_{machine['id']}"):
+                    st.warning("A máquina e as parcelas abertas do contrato serão marcadas como excluídas/canceladas.")
+                    d1, d2 = st.columns(2)
+                    if d1.button("Confirmar exclusão", key=f"confirm_machine_delete_{machine['id']}"):
+                        ex("UPDATE machinery SET status='excluido' WHERE id=:id", {"id": machine["id"]})
+                        if machine.get("contract_id"):
+                            ex("UPDATE purchase_contracts SET status='cancelado' WHERE id=:id", {"id": machine["contract_id"]})
+                            ex("UPDATE commitments SET status='cancelado' WHERE contract_id=:id AND COALESCE(status,'aberto')='aberto'", {"id": machine["contract_id"]})
+                        log_action(user["id"], "excluiu", "máquina", machine["id"], machine["name"])
+                        st.success("Máquina excluída.")
+                        st.rerun()
+                    if d2.button("Cancelar", key=f"cancel_machine_delete_{machine['id']}"):
+                        st.session_state.pop(f"confirm_delete_machine_{machine['id']}", None)
+                        st.rerun()
+
+                installments = q(
+                    """SELECT * FROM commitments
+                       WHERE contract_id=:id
+                         AND COALESCE(status,'aberto')!='cancelado'
+                       ORDER BY installment_no""",
+                    {"id": machine.get("contract_id")},
                 )
 
-            c1, c2, c3 = st.columns(3)
-            confirm_machine = c1.button(
-                "✅ Confirmar e salvar", use_container_width=True,
-                key="confirm_machine_v103"
-            )
-            correct_machine = c2.button(
-                "✏️ Corrigir informações", use_container_width=True,
-                key="correct_machine_v103"
-            )
-            discard_machine = c3.button(
-                "🗑️ Descartar lançamento", use_container_width=True,
-                key="discard_machine_v103"
-            )
-
-            if discard_machine:
-                del st.session_state.machine_draft_v103
-                st.info("Lançamento descartado. Nada foi salvo.")
-                st.rerun()
-
-            if correct_machine:
-                del st.session_state.machine_draft_v103
-                st.info("Corrija os campos acima e gere o resumo novamente.")
-                st.rerun()
-
-            if confirm_machine:
-                try:
-                    duplicate_contract = q(
-                        """SELECT id FROM purchase_contracts
-                           WHERE COALESCE(status,'aberto') != 'cancelado'
-                             AND lower(trim(description)) = lower(trim(:description))
-                             AND COALESCE(lower(trim(supplier)), '') = COALESCE(lower(trim(:supplier)), '')
-                             AND total_value = :value
-                             AND purchase_date = :purchase_date
-                           LIMIT 1""",
-                        {
-                            "description": d["machine_name"],
-                            "supplier": d["supplier"],
-                            "value": d["total_value"],
-                            "purchase_date": d["purchase_date"],
-                        },
+                if installments:
+                    st.markdown("#### Parcelas")
+                    paid_installments = sum(
+                        1 for installment in installments
+                        if machine_statuses[installment["id"]]["remaining"] <= 0.01
                     )
-                    if duplicate_contract:
-                        st.warning(
-                            "Este contrato de máquina já está registrado. Nada foi salvo."
-                        )
-                        st.stop()
-                    contract_id = insert_id(
-                        """INSERT INTO purchase_contracts
-                           (description,supplier,category,total_value,
-                            purchase_date,notes,status,created_by)
-                           VALUES(:d,:f,'Máquinas',:v,:pd,:n,'aberto',:u)""",
-                        {
-                            "d": d["machine_name"], "f": d["supplier"],
-                            "v": d["total_value"], "pd": d["purchase_date"],
-                            "n": d["notes"], "u": user["id"],
-                        },
+                    st.caption(
+                        f"{paid_installments} parcela(s) paga(s) · "
+                        f"{len(installments) - paid_installments} parcela(s) a pagar"
                     )
-                    machine_id = insert_id(
-                        """INSERT INTO machinery
-                           (name,brand,model,year,acquisition_date,
-                            acquisition_value,contract_id,status,notes,created_by)
-                           VALUES(:n,:b,:m,:y,:d,:v,:c,'ativo',:o,:u)""",
-                        {
-                            "n": d["machine_name"], "b": d["brand"],
-                            "m": d["model"], "y": d["year"],
-                            "d": d["purchase_date"], "v": d["total_value"],
-                            "c": contract_id, "o": d["notes"],
-                            "u": user["id"],
-                        },
-                    )
-                    if float(d.get("entry_value", 0)) > 0:
-                        entry_commitment_id = insert_id(
-                            """INSERT INTO commitments
-                               (contract_id,installment_no,season_id,category,
-                                description,supplier,total_value,purchase_date,
-                                due_date,payment_crop,notes,status,created_by)
-                               VALUES(:ct,0,NULL,'Máquinas',:d,:f,:v,:pd,
-                                      :pd,'Caixa',:n,'encerrado',:u)""",
-                            {
-                                "ct": contract_id,
-                                "d": f"{d['machine_name']} · Entrada",
-                                "f": d["supplier"],
-                                "v": float(d["entry_value"]),
-                                "pd": d["purchase_date"],
-                                "n": d["notes"],
-                                "u": user["id"],
-                            },
+                    for installment in installments:
+                        status = machine_statuses[installment["id"]]
+                        mark = "✅ Paga" if status["remaining"] <= 0.01 else "⏳ A pagar"
+                        st.write(
+                            f"{mark} · **Parcela "
+                            f"{installment.get('installment_no') or '-'}** — "
+                            f"{installment.get('due_date')} — "
+                            f"{money(installment.get('total_value') or 0)} — "
+                            f"pagar com **"
+                            f"{installment.get('payment_crop') or 'Caixa'}** — "
+                            f"falta {money(status['remaining'])}"
                         )
-                        insert_id(
-                            """INSERT INTO payments
-                               (commitment_id,payment_date,amount,notes,created_by)
-                               VALUES(:c,:d,:a,'Entrada da compra',:u)""",
-                            {
-                                "c": entry_commitment_id,
-                                "d": d["purchase_date"],
-                                "a": float(d["entry_value"]),
-                                "u": user["id"],
-                            },
-                        )
-                    for row in d["rows"]:
-                        insert_id(
-                            """INSERT INTO commitments
-                               (contract_id,installment_no,season_id,category,
-                                description,supplier,total_value,purchase_date,
-                                due_date,payment_crop,notes,status,created_by)
-                               VALUES(:ct,:ino,NULL,'Máquinas',:d,:f,:v,:pd,
-                                      :dt,:p,:n,'aberto',:u)""",
-                            {
-                                "ct": contract_id, "ino": row["number"],
-                                "d": f"{d['machine_name']} · Parcela {row['number']}",
-                                "f": d["supplier"], "v": float(row["value"]),
-                                "pd": d["purchase_date"], "dt": row["due_date"],
-                                "p": row["crop"], "n": d["notes"],
-                                "u": user["id"],
-                            },
-                        )
-                    log_action(
-                        user["id"], "criou", "maquina_financiada",
-                        machine_id, f"{d['machine_name']} · {len(d['rows'])} parcelas"
-                    )
-                    del st.session_state.machine_draft_v103
-                    st.success("Máquina e parcelas salvas com sucesso.")
-                    st.rerun()
-                except Exception:
-                    st.error("Não foi possível salvar a máquina e as parcelas.")
-                    st.caption("Confira os valores, as datas e tente novamente.")
-
-    with tab_list:
-        machines = q(
-            """SELECT m.*,pc.description AS contract_description,
-                      pc.total_value AS contract_total
-               FROM machinery m
-               LEFT JOIN purchase_contracts pc ON pc.id=m.contract_id
-               WHERE COALESCE(m.status,'ativo')!='excluido'
-               ORDER BY m.id DESC"""
-        )
-
-        if not machines:
-            st.info("Nenhuma máquina cadastrada.")
-        else:
-            for machine in machines:
-                with st.expander(f"🚜 {machine['name']}", expanded=False):
-                    st.write(
-                        f"**Marca/modelo:** "
-                        f"{machine.get('brand') or '—'} "
-                        f"{machine.get('model') or ''}"
-                    )
-                    st.write(
-                        f"**Valor da compra:** "
-                        f"{money(machine.get('contract_total') or machine.get('acquisition_value') or 0)}"
-                    )
-                    a1, a2, a3 = st.columns(3)
-                    if a1.button("👁️ Visualizar", key=f"view_machine_{machine['id']}"):
-                        st.info(
-                            f"Aquisição em {br_date(machine.get('acquisition_date'))}; "
-                            f"status: {machine.get('status') or 'ativo'}."
-                        )
-                    if CAN_EDIT and a2.button("✏️ Editar", key=f"open_edit_machine_{machine['id']}"):
-                        st.session_state[f"edit_machine_{machine['id']}"] = True
-                    if CAN_EDIT and a3.button("🗑️ Excluir", key=f"delete_machine_{machine['id']}"):
-                        st.session_state[f"confirm_delete_machine_{machine['id']}"] = True
-
-                    if st.session_state.get(f"edit_machine_{machine['id']}"):
-                        with st.form(f"machine_edit_form_{machine['id']}"):
-                            em1, em2 = st.columns(2)
-                            edit_machine_name = em1.text_input("Nome", value=machine.get("name") or "")
-                            edit_machine_brand = em2.text_input("Marca", value=machine.get("brand") or "")
-                            em3, em4 = st.columns(2)
-                            edit_machine_model = em3.text_input("Modelo", value=machine.get("model") or "")
-                            edit_machine_year = em4.number_input("Ano", min_value=1950, max_value=2100, value=int(machine.get("year") or date.today().year))
-                            edit_machine_notes = st.text_area("Observação", value=machine.get("notes") or "")
-                            save_machine_edit = st.form_submit_button("Salvar alterações")
-                        if save_machine_edit:
-                            ex("""UPDATE machinery SET name=:n,brand=:b,model=:m,year=:y,notes=:o WHERE id=:id""",
-                               {"n": edit_machine_name.strip(), "b": edit_machine_brand.strip(), "m": edit_machine_model.strip(), "y": edit_machine_year, "o": edit_machine_notes.strip(), "id": machine["id"]})
-                            log_action(user["id"], "editou", "máquina", machine["id"], edit_machine_name.strip())
-                            st.session_state.pop(f"edit_machine_{machine['id']}", None)
-                            st.success("Máquina atualizada.")
-                            st.rerun()
-
-                    if st.session_state.get(f"confirm_delete_machine_{machine['id']}"):
-                        st.warning("A máquina e as parcelas abertas do contrato serão marcadas como excluídas/canceladas.")
-                        d1, d2 = st.columns(2)
-                        if d1.button("Confirmar exclusão", key=f"confirm_machine_delete_{machine['id']}"):
-                            ex("UPDATE machinery SET status='excluido' WHERE id=:id", {"id": machine["id"]})
-                            if machine.get("contract_id"):
-                                ex("UPDATE purchase_contracts SET status='cancelado' WHERE id=:id", {"id": machine["contract_id"]})
-                                ex("UPDATE commitments SET status='cancelado' WHERE contract_id=:id AND COALESCE(status,'aberto')='aberto'", {"id": machine["contract_id"]})
-                            log_action(user["id"], "excluiu", "máquina", machine["id"], machine["name"])
-                            st.success("Máquina excluída.")
-                            st.rerun()
-                        if d2.button("Cancelar", key=f"cancel_machine_delete_{machine['id']}"):
-                            st.session_state.pop(f"confirm_delete_machine_{machine['id']}", None)
-                            st.rerun()
-
-                    installments = q(
-                        """SELECT * FROM commitments
-                           WHERE contract_id=:id
-                             AND COALESCE(status,'aberto')!='cancelado'
-                           ORDER BY installment_no""",
-                        {"id": machine.get("contract_id")},
-                    )
-
-                    if installments:
-                        st.markdown("#### Parcelas")
-                        paid_installments = sum(
-                            1 for installment in installments
-                            if machine_statuses[installment["id"]]["remaining"] <= 0.01
-                        )
-                        st.caption(
-                            f"{paid_installments} parcela(s) paga(s) · "
-                            f"{len(installments) - paid_installments} parcela(s) a pagar"
-                        )
-                        for installment in installments:
-                            status = machine_statuses[installment["id"]]
-                            mark = "✅ Paga" if status["remaining"] <= 0.01 else "⏳ A pagar"
-                            st.write(
-                                f"{mark} · **Parcela "
-                                f"{installment.get('installment_no') or '-'}** — "
-                                f"{installment.get('due_date')} — "
-                                f"{money(installment.get('total_value') or 0)} — "
-                                f"pagar com **"
-                                f"{installment.get('payment_crop') or 'Caixa'}** — "
-                                f"falta {money(status['remaining'])}"
-                            )
 
 elif page == "💰 Vendas":
     st.subheader("Comercialização")
@@ -3475,6 +3040,103 @@ elif page == "📈 Mercado regional":
                 "É apoio à decisão sobre venda de grão físico, não recomendação "
                 "de operação financeira — a decisão é sua."
             )
+
+    if CAN_EDIT:
+        with st.expander("📥 Importar histórico de preços (planilha)"):
+            st.caption(
+                "Traga de uma vez o histórico que você já tem. Quanto mais fundo o "
+                "histórico, melhor a leitura de mercado. Nada é gravado antes de você conferir."
+            )
+            st.markdown(
+                "**Formato:** arquivo `.csv` com as colunas **Data**, **Cultura** e "
+                "**Preço**. As colunas *Fonte* e *Praça* são opcionais. "
+                "Aceita o CSV que o Excel em português gera (`;` e vírgula decimal)."
+            )
+            st.code(
+                "Data;Cultura;Preço;Fonte;Praça\n"
+                "01/03/2026;Soja;138,50;Cooperativa;Santo Ângelo/RS\n"
+                "08/03/2026;Soja;140,00;Cooperativa;Santo Ângelo/RS",
+                language="text",
+            )
+
+            enviado = st.file_uploader(
+                "Arquivo CSV", type=["csv", "txt"], key="import_historico_arquivo"
+            )
+            previa = st.session_state.get("import_historico_previa")
+
+            if enviado is not None and not previa:
+                linhas, erros = parse_price_csv(
+                    enviado.getvalue(),
+                    culturas_validas=["Soja", "Milho", "Trigo", "Canola"],
+                )
+                st.session_state.import_historico_previa = {
+                    "linhas": linhas, "erros": erros, "nome": enviado.name,
+                }
+                st.rerun()
+
+            if previa:
+                linhas, erros = previa["linhas"], previa["erros"]
+                st.write(f"**Arquivo:** {previa['nome']}")
+
+                if erros:
+                    st.warning(f"{len(erros)} linha(s) com problema — serão ignoradas:")
+                    for erro in erros[:10]:
+                        st.write("•", erro)
+                    if len(erros) > 10:
+                        st.caption(f"... e mais {len(erros) - 10}.")
+
+                if linhas:
+                    datas = [item["data"] for item in linhas]
+                    resumo_cols = st.columns(3)
+                    resumo_cols[0].metric("Preços válidos", len(linhas))
+                    resumo_cols[1].metric(
+                        "Período",
+                        f"{min(datas).strftime('%m/%Y')} → {max(datas).strftime('%m/%Y')}",
+                    )
+                    resumo_cols[2].metric(
+                        "Culturas", ", ".join(sorted({i["cultura"] for i in linhas}))
+                    )
+                    previa_frame = pd.DataFrame([
+                        {
+                            "Data": item["data"].strftime("%d/%m/%Y"),
+                            "Cultura": item["cultura"],
+                            "Preço": money(item["preco"]),
+                            "Fonte": item["fonte"] or "—",
+                            "Praça": item["regiao"] or "—",
+                        }
+                        for item in linhas[:15]
+                    ])
+                    st.dataframe(previa_frame, use_container_width=True, hide_index=True)
+                    if len(linhas) > 15:
+                        st.caption(f"Mostrando 15 de {len(linhas)} linhas.")
+
+                imp1, imp2 = st.columns(2)
+                confirmar = imp1.button(
+                    f"✅ Importar {len(linhas)} preço(s)",
+                    key="confirmar_import_historico",
+                    use_container_width=True,
+                    type="primary",
+                    disabled=not linhas,
+                )
+                cancelar = imp2.button(
+                    "↩️ Cancelar", key="cancelar_import_historico",
+                    use_container_width=True,
+                )
+                if cancelar:
+                    st.session_state.pop("import_historico_previa", None)
+                    st.rerun()
+                if confirmar:
+                    resultado = importar_linhas(linhas, user_id=user["id"])
+                    log_action(
+                        user["id"], "importou", "cotação", None,
+                        f"{resultado['gravadas']} preços de {previa['nome']}",
+                    )
+                    st.session_state.pop("import_historico_previa", None)
+                    st.success(
+                        f"{resultado['gravadas']} preço(s) importado(s). "
+                        f"{resultado['ignoradas']} já existia(m) e foram ignorados."
+                    )
+                    st.rerun()
 
     with st.expander("🌐 Fontes de dados"):
         st.caption("Fontes conectadas e planejadas para alimentar a série de preços.")
