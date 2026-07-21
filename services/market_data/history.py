@@ -7,25 +7,20 @@ o resto do aplicativo.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from core.database import insert_id, q
 
 
-# Consultas estáticas: a região opcional entra como predicado parametrizado,
-# em vez de fragmento concatenado. Nada de SQL montado por f-string.
-_SERIE_POSTGRES = """
+# Uma única consulta serve SQLite e PostgreSQL: a data de corte é calculada em
+# Python e vai como parâmetro, evitando aritmética de data específica de cada
+# dialeto (INTERVAL vs datetime()). A região opcional entra como predicado
+# parametrizado, em vez de fragmento concatenado.
+_SERIE = """
     SELECT price_sc, quoted_at, source, region, quote_type
     FROM quotes
     WHERE lower(crop) = lower(:crop)
-      AND quoted_at >= CURRENT_TIMESTAMP - CAST(:days AS INTEGER) * INTERVAL '1 day'
-      AND (:region IS NULL OR region = :region)
-    ORDER BY quoted_at ASC, id ASC
-"""
-
-_SERIE_SQLITE = """
-    SELECT price_sc, quoted_at, source, region, quote_type
-    FROM quotes
-    WHERE lower(crop) = lower(:crop)
-      AND quoted_at >= datetime('now', '-' || :days || ' day')
+      AND quoted_at >= :desde
       AND (:region IS NULL OR region = :region)
     ORDER BY quoted_at ASC, id ASC
 """
@@ -37,10 +32,8 @@ def price_series(crop, days=180, region=None):
     Cada item é ``{"date": ..., "price": float, "source": ..., "region": ...}``.
     Filtra por janela de dias e, opcionalmente, por praça/região.
     """
-    rows = q(
-        _SERIE_POSTGRES if _is_postgres() else _SERIE_SQLITE,
-        {"crop": crop, "days": int(days), "region": region},
-    )
+    desde = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=int(days))
+    rows = q(_SERIE, {"crop": crop, "desde": desde, "region": region})
     return [
         {
             "date": row["quoted_at"],
@@ -82,9 +75,3 @@ def record_quote(crop, price, *, source, region=None, quote_type="externa",
             "source_url": source_url,
         },
     )
-
-
-def _is_postgres():
-    from core.config import IS_POSTGRES
-
-    return IS_POSTGRES

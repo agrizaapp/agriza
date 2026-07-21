@@ -3420,11 +3420,23 @@ elif page == "📈 Mercado regional":
     if ref_season:
         required_for_crop = season_summary(ref_season[0])["required_price"]
 
-    view = build_market_view(analysis_crop, required_for_crop)
-    summary = view["summary"]
-    signal = view["signal"]
+    # A camada de mercado é acessória à página: se algo falhar nela, o restante
+    # (cotações, cadastro manual, histórico) precisa continuar funcionando.
+    try:
+        view = build_market_view(analysis_crop, required_for_crop)
+    except Exception:
+        view = None
+        st.warning(
+            "Não foi possível calcular os indicadores de mercado agora. "
+            "As cotações abaixo seguem disponíveis normalmente."
+        )
 
-    if summary["count"] < 2:
+    summary = view["summary"] if view else {"count": 0}
+    signal = view["signal"] if view else None
+
+    if not view:
+        pass
+    elif summary["count"] < 2:
         st.info(
             f"Ainda há poucos registros de {analysis_crop} "
             f"({summary['count']} cotação(ões)). Registre mais preços — "
