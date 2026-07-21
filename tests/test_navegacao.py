@@ -197,6 +197,26 @@ class TestPaginaMercado:
         assert "Posição no histórico" in rotulos
         assert "Tendência" in rotulos
 
+    def test_painel_de_fundamentos_existe(self, banco_limpo):
+        at = _abrir("admin", "📈 Mercado regional")
+        assert any("Fundamentos de oferta" in str(e.label) for e in at.expander)
+
+    def test_sem_chave_o_painel_avisa_em_vez_de_quebrar(self, banco_limpo, monkeypatch):
+        monkeypatch.delenv("USDA_API_KEY", raising=False)
+        at = _abrir("admin", "📈 Mercado regional")
+        assert any("USDA_API_KEY" in str(i.value) for i in at.info)
+
+    def test_leitura_de_oferta_aparece_com_historico(self, banco_limpo):
+        from services.market_data.fundamentals_store import salvar_fundamento
+
+        for indice, valor in enumerate([50.2, 51.4, 49.6, 60.0]):
+            salvar_fundamento({
+                "commodity": "SOYBEANS", "statistic": "YIELD", "unidade": "BU / ACRE",
+                "regiao": "UNITED STATES", "ano": 2021 + indice, "valor": valor,
+            })
+        at = _abrir("admin", "📈 Mercado regional", market_analysis_crop="Soja")
+        assert any("acima da média" in str(i.value) for i in at.info)
+
     def test_grafico_aparece_quando_ha_serie(self, banco_limpo):
         """O AppTest não modela line_chart; a legenda serve de prova indireta."""
         from services.market_data.history import record_quote

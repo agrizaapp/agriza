@@ -31,6 +31,12 @@ from services.market_data import build_market_view, price_series
 from services.market_data.indicators import rolling_average
 from services.market_data.sources import available_sources, planned_sources, collect
 from services.market_data.importer import parse_price_csv, importar_linhas
+from services.market_data.fundamentals import (
+    COMMODITY_POR_CULTURA,
+    coletar as coletar_usda,
+    tem_chave as usda_tem_chave,
+)
+from services.market_data.fundamentals_store import leitura_de_oferta, serie_anual
 try:
     from market_prices import update_regional_quotes, latest_quote_for_crop
 except ModuleNotFoundError:
@@ -2688,6 +2694,70 @@ elif page == "📈 Mercado regional":
                 "É apoio à decisão sobre venda de grão físico, não recomendação "
                 "de operação financeira — a decisão é sua."
             )
+
+    with st.expander("🌍 Fundamentos de oferta (USDA)"):
+        st.caption(
+            "O preço diz onde estamos; o fundamento ajuda a explicar por quê. "
+            "Safra americana grande pressiona o preço mundial; safra pequena sustenta."
+        )
+        st.markdown(
+            "**Escopo:** o USDA/NASS publica dados dos **Estados Unidos** — não do "
+            "mundo inteiro. É um fundamento forte, porque os EUA são um dos maiores "
+            "produtores de soja e milho, mas não é um balanço mundial."
+        )
+
+        if not usda_tem_chave():
+            st.info(
+                "A variável `USDA_API_KEY` não está configurada **neste ambiente**. "
+                "Em produção ela vive nas variáveis do Render; localmente o painel "
+                "fica indisponível, o que é esperado."
+            )
+        elif CAN_EDIT and st.button(
+            "🔄 Atualizar dados do USDA", key="coletar_usda", use_container_width=True
+        ):
+            with st.spinner("Consultando o USDA/NASS..."):
+                resultado = coletar_usda()
+            if resultado["gravados"]:
+                st.success(f"{resultado['gravados']} observações atualizadas.")
+                log_action(user["id"], "coletou", "fundamento", None,
+                           f"USDA: {resultado['gravados']} registros")
+            for erro in resultado["erros"]:
+                st.warning(erro)
+            if resultado["gravados"]:
+                st.rerun()
+
+        commodity_usda = COMMODITY_POR_CULTURA.get(analysis_crop)
+        if commodity_usda:
+            leitura = leitura_de_oferta(commodity_usda, "YIELD")
+            if leitura:
+                f1, f2, f3 = st.columns(3)
+                f1.metric(
+                    f"Produtividade {leitura['ano']} (EUA)",
+                    f"{num(leitura['valor'])} {leitura['unidade'] or ''}".strip(),
+                    delta=f"{leitura['variacao_pct']:+.1f}% vs média",
+                )
+                f2.metric("Média dos anos anteriores", num(leitura["media_anterior"]))
+                f3.metric("Anos na base", leitura["anos_considerados"])
+                st.info(
+                    f"Safra americana de {analysis_crop.lower()} "
+                    f"**{leitura['leitura']}** — {leitura['efeito']}."
+                )
+                serie_usda = serie_anual(commodity_usda, "YIELD")
+                if len(serie_usda) >= 2:
+                    st.bar_chart(
+                        pd.DataFrame(
+                            {"Produtividade (EUA)": [i["valor"] for i in serie_usda]},
+                            index=[str(i["ano"]) for i in serie_usda],
+                        ),
+                        use_container_width=True,
+                    )
+            else:
+                st.caption(
+                    f"Ainda não há histórico suficiente de {analysis_crop.lower()} "
+                    "para uma leitura de oferta (são necessários ao menos 3 anos)."
+                )
+        else:
+            st.caption(f"O USDA não cobre {analysis_crop.lower()} nesta integração.")
 
     if CAN_EDIT:
         with st.expander("📥 Importar histórico de preços (planilha)"):
