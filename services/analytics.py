@@ -84,6 +84,33 @@ def commitment_status(commitment_id):
     }
 
 
+def commitment_statuses():
+    """Carrega a situação de todos os compromissos em uma única consulta."""
+    rows = q(
+        """SELECT c.id,c.total_value,
+                  COALESCE((SELECT SUM(s.quantity_sc*s.price_sc)
+                            FROM sales s WHERE s.commitment_id=c.id),0) AS protected,
+                  COALESCE((SELECT SUM(p.amount)
+                            FROM payments p WHERE p.commitment_id=c.id),0) AS paid
+           FROM commitments c"""
+    )
+    statuses = {}
+    for row in rows:
+        value = float(row.get("total_value") or 0)
+        protected = float(row.get("protected") or 0)
+        paid = float(row.get("paid") or 0)
+        covered = min(value, protected + paid)
+        statuses[row["id"]] = {
+            "value": value,
+            "protected": protected,
+            "paid": paid,
+            "covered": covered,
+            "pct": covered / value * 100 if value else 0,
+            "remaining": max(value - covered, 0),
+        }
+    return statuses
+
+
 def agroia_recommendation(season):
     summary = season_summary(season)
     quote_rows = q(
@@ -97,7 +124,11 @@ def agroia_recommendation(season):
            WHERE season_id=:id AND COALESCE(status,'aberto')='aberto'""",
         {"id": season["id"]},
     )
-    uncovered = sum(commitment_status(item["id"])["remaining"] for item in commitments)
+    status_map = commitment_statuses()
+    uncovered = sum(
+        status_map.get(item["id"], {"remaining": 0})["remaining"]
+        for item in commitments
+    )
 
     if not quote_rows:
         return {
@@ -148,5 +179,4 @@ def agroia_recommendation(season):
         "message": "Sua posição atual pede equilíbrio entre proteção e oportunidade.",
         "details": details,
     }
-
 
