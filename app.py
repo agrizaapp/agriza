@@ -74,7 +74,7 @@ cookie_manager = stx.CookieManager(key="agriza_cookie_manager")
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
-st.caption("Versão ativa: AGRIZA Enterprise 3.0 · base consolidada para Codex")
+st.caption("Versão ativa: AGRIZA Enterprise 3.1")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
@@ -222,14 +222,19 @@ view_pages = [
     "🚜 Máquinas e financiamentos",
     "💰 Vendas",
     "📈 Mercado regional",
+    "⚙️ Cadastro",
 ]
 pages = menu_pages + view_pages
 if user["role"] == "admin":
-    menu_pages.append("📦 Reserva")
-    pages.extend(["👥 Usuários", "📦 Reserva"])
+    menu_pages.append("📦 BACKUP")
+    pages.extend(["👥 Usuários", "📦 BACKUP"])
 
 if "current_page" not in st.session_state or st.session_state.current_page not in pages:
     st.session_state.current_page = pages[0]
+if "menu_should_expand" not in st.session_state:
+    st.session_state.menu_should_expand = False
+if st.session_state.current_page != "🏠 Início":
+    st.session_state.menu_should_expand = False
 
 if "page_history" not in st.session_state:
     st.session_state.page_history = []
@@ -250,7 +255,7 @@ if st.session_state.current_page != "🏠 Início":
 
 with st.expander(
     f"☰ Menu principal — {st.session_state.current_page}",
-    expanded=True,
+    expanded=st.session_state.menu_should_expand,
 ):
     st.caption("Toque em uma área para abrir.")
     with st.container(key="main_menu_grid"):
@@ -266,6 +271,7 @@ with st.expander(
                         type=button_type,
                     ):
                         st.session_state.current_page = label
+                        st.session_state.menu_should_expand = label == "🏠 Início"
                         st.rerun()
 
 page = st.session_state.current_page
@@ -439,11 +445,11 @@ elif page == "📝 Lançar / Visualizar":
     st.caption("Escolha uma área. Em cada tela você pode registrar e consultar seus lançamentos.")
 
     c1, c2 = st.columns(2)
-    if c1.button("🛒 Compras", use_container_width=True, type="primary"):
+    if c1.button("🛒 Compra", use_container_width=True, type="primary"):
         st.session_state.purchase_show_history = False
         st.session_state.current_page = "🛒 Compras"
         st.rerun()
-    if c2.button("💰 Vendas", use_container_width=True, type="primary"):
+    if c2.button("💰 Venda", use_container_width=True, type="primary"):
         st.session_state.sale_show_history = False
         st.session_state.current_page = "💰 Vendas"
         st.rerun()
@@ -452,12 +458,22 @@ elif page == "📝 Lançar / Visualizar":
     if c3.button("🌾 Nova safra", use_container_width=True):
         st.session_state.current_page = "🌾 Safras"
         st.rerun()
-    if c4.button("📈 Cotações", use_container_width=True):
+    if c4.button("📈 Cotação", use_container_width=True):
         st.session_state.current_page = "📈 Mercado regional"
         st.rerun()
 
-    if st.button("📋 Ver contas e pagamentos", use_container_width=True):
+    c5, c6 = st.columns(2)
+    if c5.button("🧾 Ver Contas", use_container_width=True):
+        st.session_state.account_payment_filter = "A pagar"
         st.session_state.current_page = "🧾 Contas e pagamentos"
+        st.rerun()
+    if c6.button("💳 Pagamentos", use_container_width=True):
+        st.session_state.account_payment_filter = "Pagas"
+        st.session_state.current_page = "🧾 Contas e pagamentos"
+        st.rerun()
+
+    if st.button("⚙️ Cadastro", use_container_width=True):
+        st.session_state.current_page = "⚙️ Cadastro"
         st.rerun()
 
     st.info(
@@ -2835,6 +2851,109 @@ elif page == "📈 Mercado regional":
                         st.rerun()
 
 
+elif page == "⚙️ Cadastro":
+    st.subheader("Cadastro")
+    st.caption("Cadastre as informações-base que serão reutilizadas nos lançamentos.")
+    if not CAN_EDIT:
+        st.info("Seu perfil permite apenas consulta dos cadastros.")
+
+    company_tab, product_tab, unit_tab = st.tabs(["Empresa", "Produto", "Unidade"])
+
+    with company_tab:
+        if CAN_EDIT:
+            with st.form("new_company", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                company_name = c1.text_input("Nome da empresa")
+                company_document = c2.text_input("CNPJ/CPF (opcional)")
+                c3, c4 = st.columns(2)
+                company_city = c3.text_input("Cidade")
+                company_state = c4.text_input("UF", max_chars=2).upper()
+                save_company = st.form_submit_button("Salvar empresa", use_container_width=True)
+            if save_company:
+                if not company_name.strip():
+                    st.error("Informe o nome da empresa.")
+                else:
+                    try:
+                        company_id = insert_id(
+                            """INSERT INTO companies(name,document,city,state,created_by)
+                               VALUES(:n,:d,:c,:s,:u)""",
+                            {
+                                "n": company_name.strip(),
+                                "d": company_document.strip(),
+                                "c": company_city.strip(),
+                                "s": company_state.strip(),
+                                "u": user["id"],
+                            },
+                        )
+                        log_action(user["id"], "criou", "empresa", company_id, company_name.strip())
+                        st.success("Empresa cadastrada.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível cadastrar. Verifique se a empresa já existe.")
+        companies = q("SELECT name,document,city,state FROM companies WHERE active=TRUE ORDER BY name")
+        if companies:
+            st.dataframe(pd.DataFrame(companies), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Nenhuma empresa cadastrada.")
+
+    with product_tab:
+        units = q("SELECT id,code,description FROM units WHERE active=TRUE ORDER BY code")
+        unit_map = {f"{unit['code']} · {unit.get('description') or unit['code']}": unit["id"] for unit in units}
+        if CAN_EDIT:
+            with st.form("new_product", clear_on_submit=True):
+                product_name = st.text_input("Nome do produto")
+                product_unit = st.selectbox("Unidade padrão", list(unit_map)) if unit_map else None
+                save_product = st.form_submit_button("Salvar produto", use_container_width=True)
+            if save_product:
+                if not product_name.strip() or not product_unit:
+                    st.error("Informe o produto e sua unidade padrão.")
+                else:
+                    try:
+                        product_id = insert_id(
+                            """INSERT INTO products(name,unit_id,created_by)
+                               VALUES(:n,:u,:by)""",
+                            {"n": product_name.strip(), "u": unit_map[product_unit], "by": user["id"]},
+                        )
+                        log_action(user["id"], "criou", "produto", product_id, product_name.strip())
+                        st.success("Produto cadastrado.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível cadastrar. Verifique se o produto já existe.")
+        products = q(
+            """SELECT products.name,units.code AS unit
+               FROM products LEFT JOIN units ON units.id=products.unit_id
+               WHERE products.active=TRUE ORDER BY products.name"""
+        )
+        if products:
+            st.dataframe(pd.DataFrame(products), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Nenhum produto cadastrado.")
+
+    with unit_tab:
+        if CAN_EDIT:
+            with st.form("new_unit", clear_on_submit=True):
+                u1, u2 = st.columns(2)
+                unit_code = u1.text_input("Sigla", max_chars=12).upper()
+                unit_description = u2.text_input("Descrição")
+                save_unit = st.form_submit_button("Salvar unidade", use_container_width=True)
+            if save_unit:
+                if not unit_code.strip():
+                    st.error("Informe a sigla da unidade.")
+                else:
+                    try:
+                        unit_id = insert_id(
+                            """INSERT INTO units(code,description,created_by)
+                               VALUES(:c,:d,:u)""",
+                            {"c": unit_code.strip(), "d": unit_description.strip(), "u": user["id"]},
+                        )
+                        log_action(user["id"], "criou", "unidade", unit_id, unit_code.strip())
+                        st.success("Unidade cadastrada.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível cadastrar. Verifique se a sigla já existe.")
+        units_display = q("SELECT code,description FROM units WHERE active=TRUE ORDER BY code")
+        st.dataframe(pd.DataFrame(units_display), use_container_width=True, hide_index=True)
+
 elif page == "👥 Usuários":
     st.subheader("Usuários da família")
 
@@ -2902,7 +3021,7 @@ elif page == "👥 Usuários":
                 st.rerun()
 
 
-elif page == "📦 Reserva":
+elif page == "📦 BACKUP":
     st.subheader("Backup e conferência")
     st.caption(
         "Baixe este arquivo sempre que quiser guardar uma cópia dos seus dados. "
