@@ -1866,7 +1866,7 @@ elif page == "🚜 Máquinas e financiamentos":
                 c4, c5 = st.columns(2)
                 interest_rate = c4.number_input("Taxa de juros anual (%)", min_value=0.0, value=10.0, step=0.1, key="machine_financed_rate_v31")
                 finance_table = c5.selectbox("Tabela", ["SAC", "Price"], key="machine_financed_table_v31")
-                calculation_signature = (float(financed_value), int(years), float(interest_rate), finance_table)
+                calculation_signature = (purchase_date, float(financed_value), int(years), float(interest_rate), finance_table)
                 if st.session_state.get("machine_financed_signature_v31") != calculation_signature:
                     for index in range(30):
                         st.session_state.pop(f"machine_financed_due_v31_{index}", None)
@@ -1881,21 +1881,27 @@ elif page == "🚜 Máquinas e financiamentos":
                     if finance_table == "Price" and rate > 0 else balance / count
                 ) if count else 0.0
                 st.markdown("#### Parcelas calculadas — você pode ajustar os valores")
+                st.caption("As datas são o aniversário anual da data de compra. Em SAC, a amortização é constante e os juros incidem sobre o saldo devedor inicial de cada ano.")
                 for index in range(count):
-                    interest = balance * rate
+                    opening_balance = balance
+                    try:
+                        calculated_due_date = purchase_date.replace(year=purchase_date.year + index + 1)
+                    except ValueError:
+                        calculated_due_date = purchase_date.replace(year=purchase_date.year + index + 1, day=28)
+                    interest = opening_balance * rate
                     if finance_table == "SAC":
-                        amortization = float(financed_value) / count
+                        amortization = min(float(financed_value) / count, opening_balance)
                         calculated_value = amortization + interest
                     else:
                         calculated_value = fixed_payment
                         amortization = calculated_value - interest
-                    amortization = min(amortization, balance)
-                    balance = max(balance - amortization, 0)
-                    p1, p2, p3 = st.columns(3)
-                    p1.write(f"**Parcela {index + 1}**")
+                        amortization = min(amortization, opening_balance)
+                    balance = max(opening_balance - amortization, 0)
+                    p1, p2, p3, p4 = st.columns(4)
+                    p1.markdown(f"**Parcela {index + 1}**\n\nCalculada: **{money(calculated_value)}**")
                     due_date_value = p2.date_input(
                         "Vencimento",
-                        value=purchase_date + timedelta(days=365 * (index + 1)),
+                        value=calculated_due_date,
                         format="DD/MM/YYYY",
                         key=f"machine_financed_due_v31_{index}",
                     )
@@ -1906,6 +1912,7 @@ elif page == "🚜 Máquinas e financiamentos":
                         step=100.0,
                         key=f"machine_financed_value_v31_{index}",
                     )
+                    p4.caption(f"Juros: {money(interest)}\n\nSaldo: {money(balance)}")
                     rows.append({"number": index + 1, "due_date": due_date_value, "value": float(installment_value)})
                 total_with_interest = sum(row["value"] for row in rows)
                 s1, s2, s3 = st.columns(3)
@@ -1914,7 +1921,13 @@ elif page == "🚜 Máquinas e financiamentos":
                 s3.metric("Total com juros", money(total_with_interest))
 
             total_due = sum(row["value"] for row in rows)
-            if st.button("🔎 Conferir operação", key="review_machine_purchase_v31", use_container_width=True, type="primary"):
+            action_review, action_cancel = st.columns(2)
+            review_operation = action_review.button("🔎 Conferir operação", key="review_machine_purchase_v31", use_container_width=True, type="primary")
+            cancel_operation = action_cancel.button("↩️ Cancelar e voltar", key="cancel_machine_before_review_v31", use_container_width=True)
+            if cancel_operation:
+                st.session_state.current_page = "📝 Lançar / Visualizar"
+                st.rerun()
+            if review_operation:
                 if not model.strip():
                     st.error("Informe o modelo da máquina.")
                 elif financed_value <= 0 or not rows or any(row["value"] <= 0 for row in rows):
