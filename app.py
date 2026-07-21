@@ -263,7 +263,7 @@ view_pages = [
 ]
 pages = menu_pages + view_pages
 if user["role"] == "admin":
-    menu_pages.append("📦 BACKUP")
+    menu_pages.extend(["👥 Usuários", "📦 BACKUP"])
     pages.extend(["👥 Usuários", "📦 BACKUP"])
 
 if "current_page" not in st.session_state or st.session_state.current_page not in pages:
@@ -459,27 +459,6 @@ if page == "🏠 Início":
                 st.write(
                     f"• **{br_date(item['due_date'])}** — {item['description']} — {money(item['total_value'])}"
                 )
-
-
-elif page == "👁️ Visualizar":
-    st.subheader("O que você quer visualizar?")
-    st.caption("Escolha uma área para consultar lançamentos, indicadores e histórico.")
-    view_options = [
-        ("🌾 Safras", "🌾 Safras"),
-        ("🛒 Compras", "🛒 Compras"),
-        ("💰 Vendas", "💰 Vendas"),
-        ("🚜 Máquinas", "🚜 Máquinas e financiamentos"),
-        ("📈 Mercado", "📈 Mercado regional"),
-    ]
-    if user["role"] == "admin":
-        view_options.append(("👥 Usuários", "👥 Usuários"))
-    for start in range(0, len(view_options), 2):
-        cols = st.columns(2)
-        for offset, (label, destination) in enumerate(view_options[start:start + 2]):
-            with cols[offset]:
-                if st.button(label, key=f"view_{destination}", use_container_width=True):
-                    st.session_state.current_page = destination
-                    st.rerun()
 
 
 elif page == "📝 Lançar / Visualizar":
