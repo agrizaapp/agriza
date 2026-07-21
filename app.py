@@ -74,7 +74,7 @@ cookie_manager = stx.CookieManager(key="agriza_cookie_manager")
 
 st.markdown('<div class="brand">🌱 AGRIZA</div>', unsafe_allow_html=True)
 st.markdown('<div class="subbrand">AgroIA • Transformando informação em decisão.</div>', unsafe_allow_html=True)
-st.caption("Versão ativa: AGRIZA Enterprise 3.0 · base consolidada para Codex")
+st.caption("Versão ativa: AGRIZA Enterprise 3.1")
 
 if not setup_complete():
     st.subheader("Primeira configuração")
@@ -222,14 +222,19 @@ view_pages = [
     "🚜 Máquinas e financiamentos",
     "💰 Vendas",
     "📈 Mercado regional",
+    "⚙️ Cadastro",
 ]
 pages = menu_pages + view_pages
 if user["role"] == "admin":
-    menu_pages.append("📦 Reserva")
-    pages.extend(["👥 Usuários", "📦 Reserva"])
+    menu_pages.append("📦 BACKUP")
+    pages.extend(["👥 Usuários", "📦 BACKUP"])
 
 if "current_page" not in st.session_state or st.session_state.current_page not in pages:
     st.session_state.current_page = pages[0]
+if "menu_should_expand" not in st.session_state:
+    st.session_state.menu_should_expand = False
+if st.session_state.current_page != "🏠 Início":
+    st.session_state.menu_should_expand = False
 
 if "page_history" not in st.session_state:
     st.session_state.page_history = []
@@ -250,7 +255,7 @@ if st.session_state.current_page != "🏠 Início":
 
 with st.expander(
     f"☰ Menu principal — {st.session_state.current_page}",
-    expanded=True,
+    expanded=st.session_state.menu_should_expand,
 ):
     st.caption("Toque em uma área para abrir.")
     with st.container(key="main_menu_grid"):
@@ -266,6 +271,7 @@ with st.expander(
                         type=button_type,
                     ):
                         st.session_state.current_page = label
+                        st.session_state.menu_should_expand = label == "🏠 Início"
                         st.rerun()
 
 page = st.session_state.current_page
@@ -439,11 +445,11 @@ elif page == "📝 Lançar / Visualizar":
     st.caption("Escolha uma área. Em cada tela você pode registrar e consultar seus lançamentos.")
 
     c1, c2 = st.columns(2)
-    if c1.button("🛒 Compras", use_container_width=True, type="primary"):
+    if c1.button("🛒 Compra", use_container_width=True, type="primary"):
         st.session_state.purchase_show_history = False
         st.session_state.current_page = "🛒 Compras"
         st.rerun()
-    if c2.button("💰 Vendas", use_container_width=True, type="primary"):
+    if c2.button("💰 Venda", use_container_width=True, type="primary"):
         st.session_state.sale_show_history = False
         st.session_state.current_page = "💰 Vendas"
         st.rerun()
@@ -452,12 +458,22 @@ elif page == "📝 Lançar / Visualizar":
     if c3.button("🌾 Nova safra", use_container_width=True):
         st.session_state.current_page = "🌾 Safras"
         st.rerun()
-    if c4.button("📈 Cotações", use_container_width=True):
+    if c4.button("📈 Cotação", use_container_width=True):
         st.session_state.current_page = "📈 Mercado regional"
         st.rerun()
 
-    if st.button("📋 Ver contas e pagamentos", use_container_width=True):
+    c5, c6 = st.columns(2)
+    if c5.button("🧾 Ver Contas", use_container_width=True):
+        st.session_state.account_payment_filter = "A pagar"
         st.session_state.current_page = "🧾 Contas e pagamentos"
+        st.rerun()
+    if c6.button("💳 Pagamentos", use_container_width=True):
+        st.session_state.account_payment_filter = "Pagas"
+        st.session_state.current_page = "🧾 Contas e pagamentos"
+        st.rerun()
+
+    if st.button("⚙️ Cadastro", use_container_width=True):
+        st.session_state.current_page = "⚙️ Cadastro"
         st.rerun()
 
     st.info(
@@ -912,6 +928,168 @@ elif page == "🛒 Compras":
             "Cultura", ["Todas", "Soja", "Milho", "Trigo", "Canola", "Caixa"],
             key="purchase_history_crop",
         )
+
+    if st.session_state.pop("reset_purchase_route_v31", False):
+        st.session_state.pop("purchase_route_v31", None)
+
+    if CAN_EDIT and not show_purchase_history:
+        st.markdown("### Nova compra")
+        purchase_route = st.radio(
+            "Tipo de compra",
+            ["Insumos", "Máquinas", "Bancos"],
+            horizontal=True,
+            key="purchase_route_v31",
+        )
+        if purchase_route in ("Máquinas", "Bancos"):
+            st.session_state.reset_purchase_route_v31 = True
+            st.session_state.current_page = "🚜 Máquinas e financiamentos"
+            st.rerun()
+
+        companies = q("SELECT id,name FROM companies WHERE active=TRUE ORDER BY name")
+        products = q(
+            """SELECT products.id,products.name,products.unit_id
+               FROM products WHERE products.active=TRUE ORDER BY products.name"""
+        )
+        units = q("SELECT id,code,description FROM units WHERE active=TRUE ORDER BY code")
+        if not companies or not products or not units:
+            st.warning("Cadastre ao menos uma empresa, um produto e uma unidade antes de lançar insumos.")
+            if st.button("⚙️ Abrir Cadastro", key="open_catalog_from_purchase", use_container_width=True):
+                st.session_state.current_page = "⚙️ Cadastro"
+                st.rerun()
+            st.stop()
+
+        company_map = {company["name"]: company for company in companies}
+        product_map = {product["name"]: product for product in products}
+        unit_map = {
+            f"{unit['code']} · {unit.get('description') or unit['code']}": unit
+            for unit in units
+        }
+
+        draft = st.session_state.get("insumo_purchase_review_v31")
+        if not draft:
+            c1, c2 = st.columns(2)
+            selected_company_name = c1.selectbox("Empresa", list(company_map), key="insumo_company_v31")
+            selected_product_name = c2.selectbox("Produto", list(product_map), key="insumo_product_v31")
+            selected_product = product_map[selected_product_name]
+            default_unit_index = next(
+                (
+                    index for index, unit in enumerate(unit_map.values())
+                    if unit["id"] == selected_product.get("unit_id")
+                ),
+                0,
+            )
+
+            c3, c4 = st.columns(2)
+            purchase_date = c3.date_input(
+                "Data da compra", value=date.today(), format="DD/MM/YYYY", key="insumo_purchase_date_v31"
+            )
+            payment_date = c4.date_input(
+                "Data do pagamento", value=date.today(), format="DD/MM/YYYY", key="insumo_payment_date_v31"
+            )
+            c5, c6 = st.columns(2)
+            quantity = c5.number_input("Quantidade", min_value=0.0, step=1.0, key="insumo_quantity_v31")
+            selected_unit_label = c6.selectbox(
+                "Unidade", list(unit_map), index=default_unit_index, key="insumo_unit_v31"
+            )
+            unit_price = st.number_input(
+                "Valor unitário (R$)", min_value=0.0, step=0.01, format="%.2f", key="insumo_unit_price_v31"
+            )
+            total_value = round(float(quantity) * float(unit_price), 2)
+            st.number_input("Valor total (R$)", value=total_value, format="%.2f", disabled=True)
+
+            if st.button("🔎 Revisar compra", key="review_insumo_purchase_v31", use_container_width=True, type="primary"):
+                if quantity <= 0 or unit_price <= 0:
+                    st.error("Informe uma quantidade e um valor unitário maiores que zero.")
+                else:
+                    st.session_state.insumo_purchase_review_v31 = {
+                        "company": company_map[selected_company_name],
+                        "product": selected_product,
+                        "unit": unit_map[selected_unit_label],
+                        "purchase_date": purchase_date,
+                        "payment_date": payment_date,
+                        "quantity": float(quantity),
+                        "unit_price": float(unit_price),
+                        "total_value": total_value,
+                    }
+                    st.rerun()
+        else:
+            confirmation_card(
+                "🧾 Resumo da compra de insumos",
+                [
+                    ("Empresa", draft["company"]["name"]),
+                    ("Produto", draft["product"]["name"]),
+                    ("Data da compra", br_date(draft["purchase_date"])),
+                    ("Data do pagamento", br_date(draft["payment_date"])),
+                    ("Quantidade", f"{num(draft['quantity'])} {draft['unit']['code']}"),
+                    ("Valor unitário", money(draft["unit_price"])),
+                ],
+                "Valor total",
+                money(draft["total_value"]),
+            )
+            r1, r2, r3 = st.columns(3)
+            save_insumo = r1.button("✅ Salvar", key="save_insumo_purchase_v31", use_container_width=True, type="primary")
+            cancel_insumo = r2.button("↩️ Cancelar e voltar", key="cancel_insumo_purchase_v31", use_container_width=True)
+            edit_insumo = r3.button("✏️ Editar compra", key="edit_insumo_purchase_v31", use_container_width=True)
+
+            if edit_insumo:
+                st.session_state.pop("insumo_purchase_review_v31", None)
+                st.rerun()
+            if cancel_insumo:
+                for key in [
+                    "insumo_purchase_review_v31", "insumo_company_v31", "insumo_product_v31",
+                    "insumo_purchase_date_v31", "insumo_payment_date_v31", "insumo_quantity_v31",
+                    "insumo_unit_v31", "insumo_unit_price_v31",
+                ]:
+                    st.session_state.pop(key, None)
+                st.session_state.current_page = "📝 Lançar / Visualizar"
+                st.rerun()
+            if save_insumo:
+                duplicate = q(
+                    """SELECT id FROM commitments
+                       WHERE COALESCE(status,'aberto') != 'cancelado'
+                         AND company_id=:company_id AND product_id=:product_id
+                         AND purchase_date=:purchase_date AND due_date=:payment_date
+                         AND quantity=:quantity AND unit_price=:unit_price
+                       LIMIT 1""",
+                    {
+                        "company_id": draft["company"]["id"],
+                        "product_id": draft["product"]["id"],
+                        "purchase_date": draft["purchase_date"],
+                        "payment_date": draft["payment_date"],
+                        "quantity": draft["quantity"],
+                        "unit_price": draft["unit_price"],
+                    },
+                )
+                if duplicate:
+                    st.warning("Esta compra de insumo já está registrada. Nada foi salvo.")
+                else:
+                    commitment_id = insert_id(
+                        """INSERT INTO commitments
+                           (company_id,product_id,unit_id,quantity,unit_price,category,description,
+                            supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
+                           VALUES(:company_id,:product_id,:unit_id,:quantity,:unit_price,'Insumos',:description,
+                                  :supplier,:total_value,:purchase_date,:payment_date,'Caixa',:notes,'aberto',:created_by)""",
+                        {
+                            "company_id": draft["company"]["id"],
+                            "product_id": draft["product"]["id"],
+                            "unit_id": draft["unit"]["id"],
+                            "quantity": draft["quantity"],
+                            "unit_price": draft["unit_price"],
+                            "description": draft["product"]["name"],
+                            "supplier": draft["company"]["name"],
+                            "total_value": draft["total_value"],
+                            "purchase_date": draft["purchase_date"],
+                            "payment_date": draft["payment_date"],
+                            "notes": f"{num(draft['quantity'])} {draft['unit']['code']} × {money(draft['unit_price'])}",
+                            "created_by": user["id"],
+                        },
+                    )
+                    log_action(user["id"], "criou", "compra_insumo", commitment_id, draft["product"]["name"])
+                    for key in ["insumo_purchase_review_v31", "insumo_quantity_v31", "insumo_unit_price_v31"]:
+                        st.session_state.pop(key, None)
+                    st.success("Compra de insumo salva com sucesso.")
+                    st.rerun()
+        st.stop()
 
     def save_purchase_record(
         description,
@@ -1614,6 +1792,221 @@ elif page == "🚜 Máquinas e financiamentos":
         "Cadastre aqui a plantadeira e todas as parcelas da compra, "
         "em um único passo."
     )
+
+    machine_screen = st.radio(
+        "Área de máquinas",
+        ["➕ Nova máquina", "📋 Máquinas cadastradas"],
+        horizontal=True,
+        key="machine_screen_v31",
+    )
+    if CAN_EDIT and machine_screen == "➕ Nova máquina":
+        companies = q("SELECT id,name FROM companies WHERE active=TRUE ORDER BY name")
+        if not companies:
+            st.warning("Cadastre primeiro o fornecedor na área Cadastro → Empresa.")
+            if st.button("⚙️ Abrir Cadastro", key="open_catalog_from_machine", use_container_width=True):
+                st.session_state.current_page = "⚙️ Cadastro"
+                st.rerun()
+            st.stop()
+
+        supplier_map = {company["name"]: company for company in companies}
+        review = st.session_state.get("machine_purchase_review_v31")
+        if not review:
+            st.markdown("### Nova máquina")
+            model = st.text_input("Modelo da máquina", placeholder="Ex.: Plantadeira 13 linhas", key="machine_model_v31")
+            supplier_name = st.selectbox("Fornecedor", list(supplier_map), key="machine_supplier_v31")
+            machine_mode = st.radio(
+                "Forma de pagamento",
+                ["À vista", "Parcelada", "Financiada"],
+                horizontal=True,
+                key="machine_mode_v31",
+            )
+            rows = []
+            purchase_date = date.today()
+            financed_value = 0.0
+            interest_rate = 0.0
+            finance_table = None
+
+            if machine_mode == "À vista":
+                c1, c2, c3 = st.columns(3)
+                purchase_date = c1.date_input("Data da compra", value=date.today(), format="DD/MM/YYYY", key="machine_cash_date_v31")
+                payment_date = c2.date_input("Data do pagamento", value=purchase_date, format="DD/MM/YYYY", key="machine_cash_payment_date_v31")
+                paid_value = c3.number_input("Valor pago (R$)", min_value=0.0, step=1000.0, key="machine_cash_value_v31")
+                rows = [{"number": 1, "due_date": payment_date, "value": float(paid_value)}]
+                financed_value = float(paid_value)
+
+            elif machine_mode == "Parcelada":
+                c1, c2, c3 = st.columns(3)
+                purchase_date = c1.date_input("Data da compra", value=date.today(), format="DD/MM/YYYY", key="machine_installment_date_v31")
+                financed_value = c2.number_input("Valor da máquina (R$)", min_value=0.0, step=1000.0, key="machine_installment_total_v31")
+                installment_count = c3.number_input("Número de parcelas", min_value=1, max_value=60, value=2, step=1, key="machine_installment_count_v31")
+                st.markdown("#### Parcelas")
+                default_value = float(financed_value) / int(installment_count) if installment_count else 0.0
+                for index in range(int(installment_count)):
+                    p1, p2 = st.columns(2)
+                    due_date_value = p1.date_input(
+                        f"Vencimento da parcela {index + 1}",
+                        value=purchase_date + timedelta(days=30 * (index + 1)),
+                        format="DD/MM/YYYY",
+                        key=f"machine_installment_due_v31_{index}",
+                    )
+                    installment_value = p2.number_input(
+                        f"Valor da parcela {index + 1} (R$)",
+                        min_value=0.0,
+                        value=default_value,
+                        step=1000.0,
+                        key=f"machine_installment_value_v31_{index}",
+                    )
+                    rows.append({"number": index + 1, "due_date": due_date_value, "value": float(installment_value)})
+
+            else:
+                c1, c2, c3 = st.columns(3)
+                purchase_date = c1.date_input("Data da compra", value=date.today(), format="DD/MM/YYYY", key="machine_financed_date_v31")
+                financed_value = c2.number_input("Valor do bem financiado (R$)", min_value=0.0, step=1000.0, key="machine_financed_value_v31")
+                years = c3.number_input("Anos para pagar", min_value=1, max_value=30, value=3, step=1, key="machine_financed_years_v31")
+                c4, c5 = st.columns(2)
+                interest_rate = c4.number_input("Taxa de juros anual (%)", min_value=0.0, value=10.0, step=0.1, key="machine_financed_rate_v31")
+                finance_table = c5.selectbox("Tabela", ["SAC", "Price"], key="machine_financed_table_v31")
+                calculation_signature = (float(financed_value), int(years), float(interest_rate), finance_table)
+                if st.session_state.get("machine_financed_signature_v31") != calculation_signature:
+                    for index in range(30):
+                        st.session_state.pop(f"machine_financed_due_v31_{index}", None)
+                        st.session_state.pop(f"machine_financed_value_v31_{index}", None)
+                    st.session_state.machine_financed_signature_v31 = calculation_signature
+
+                balance = float(financed_value)
+                rate = float(interest_rate) / 100
+                count = int(years)
+                fixed_payment = (
+                    balance * rate / (1 - (1 + rate) ** -count)
+                    if finance_table == "Price" and rate > 0 else balance / count
+                ) if count else 0.0
+                st.markdown("#### Parcelas calculadas — você pode ajustar os valores")
+                for index in range(count):
+                    interest = balance * rate
+                    if finance_table == "SAC":
+                        amortization = float(financed_value) / count
+                        calculated_value = amortization + interest
+                    else:
+                        calculated_value = fixed_payment
+                        amortization = calculated_value - interest
+                    amortization = min(amortization, balance)
+                    balance = max(balance - amortization, 0)
+                    p1, p2, p3 = st.columns(3)
+                    p1.write(f"**Parcela {index + 1}**")
+                    due_date_value = p2.date_input(
+                        "Vencimento",
+                        value=purchase_date + timedelta(days=365 * (index + 1)),
+                        format="DD/MM/YYYY",
+                        key=f"machine_financed_due_v31_{index}",
+                    )
+                    installment_value = p3.number_input(
+                        "Valor da parcela (R$)",
+                        min_value=0.0,
+                        value=round(calculated_value, 2),
+                        step=100.0,
+                        key=f"machine_financed_value_v31_{index}",
+                    )
+                    rows.append({"number": index + 1, "due_date": due_date_value, "value": float(installment_value)})
+                total_with_interest = sum(row["value"] for row in rows)
+                s1, s2, s3 = st.columns(3)
+                s1.metric("Valor financiado", money(financed_value))
+                s2.metric("Total de juros", money(max(total_with_interest - float(financed_value), 0)))
+                s3.metric("Total com juros", money(total_with_interest))
+
+            total_due = sum(row["value"] for row in rows)
+            if st.button("🔎 Conferir operação", key="review_machine_purchase_v31", use_container_width=True, type="primary"):
+                if not model.strip():
+                    st.error("Informe o modelo da máquina.")
+                elif financed_value <= 0 or not rows or any(row["value"] <= 0 for row in rows):
+                    st.error("Confira o valor da máquina e todas as parcelas.")
+                else:
+                    st.session_state.machine_purchase_review_v31 = {
+                        "model": model.strip(),
+                        "supplier": supplier_map[supplier_name],
+                        "mode": machine_mode,
+                        "purchase_date": purchase_date,
+                        "financed_value": float(financed_value),
+                        "interest_rate": float(interest_rate),
+                        "finance_table": finance_table,
+                        "total_due": float(total_due),
+                        "rows": rows,
+                    }
+                    st.rerun()
+        else:
+            confirmation_card(
+                "🚜 Conferência da operação",
+                [
+                    ("Modelo", review["model"]),
+                    ("Fornecedor", review["supplier"]["name"]),
+                    ("Forma de pagamento", review["mode"]),
+                    ("Data da compra", br_date(review["purchase_date"])),
+                    ("Valor do bem", money(review["financed_value"])),
+                    ("Tabela", review["finance_table"] or "Não se aplica"),
+                    ("Juros totais", money(max(review["total_due"] - review["financed_value"], 0))),
+                ],
+                "Total a pagar",
+                money(review["total_due"]),
+            )
+            for row in review["rows"]:
+                st.write(f"Parcela {row['number']} · {br_date(row['due_date'])} · {money(row['value'])}")
+            r1, r2, r3 = st.columns(3)
+            confirm_machine = r1.button("✅ Confirmar", key="confirm_machine_purchase_v31", use_container_width=True, type="primary")
+            cancel_machine = r2.button("↩️ Cancelar e voltar", key="cancel_machine_purchase_v31", use_container_width=True)
+            edit_machine = r3.button("✏️ Editar", key="edit_machine_purchase_v31", use_container_width=True)
+
+            if edit_machine:
+                st.session_state.pop("machine_purchase_review_v31", None)
+                st.rerun()
+            if cancel_machine:
+                for key in ["machine_purchase_review_v31", "machine_model_v31", "machine_supplier_v31", "machine_mode_v31"]:
+                    st.session_state.pop(key, None)
+                st.session_state.current_page = "📝 Lançar / Visualizar"
+                st.rerun()
+            if confirm_machine:
+                duplicate = q(
+                    """SELECT id FROM purchase_contracts
+                       WHERE COALESCE(status,'aberto') != 'cancelado'
+                         AND lower(trim(description))=lower(trim(:description))
+                         AND lower(trim(supplier))=lower(trim(:supplier))
+                         AND purchase_date=:purchase_date AND total_value=:total_value
+                       LIMIT 1""",
+                    {"description": review["model"], "supplier": review["supplier"]["name"], "purchase_date": review["purchase_date"], "total_value": review["total_due"]},
+                )
+                if duplicate:
+                    st.warning("Esta operação de máquina já está registrada. Nada foi salvo.")
+                else:
+                    notes = (
+                        f"{review['mode']}"
+                        + (f" · {review['finance_table']} · juros {review['interest_rate']:.2f}% a.a." if review["finance_table"] else "")
+                    )
+                    contract_id = insert_id(
+                        """INSERT INTO purchase_contracts(description,supplier,category,total_value,purchase_date,notes,status,created_by)
+                           VALUES(:d,:s,'Máquinas',:v,:pd,:n,'aberto',:u)""",
+                        {"d": review["model"], "s": review["supplier"]["name"], "v": review["total_due"], "pd": review["purchase_date"], "n": notes, "u": user["id"]},
+                    )
+                    machine_id = insert_id(
+                        """INSERT INTO machinery(name,model,acquisition_date,acquisition_value,contract_id,status,notes,created_by)
+                           VALUES(:n,:m,:d,:v,:c,'ativo',:o,:u)""",
+                        {"n": review["model"], "m": review["model"], "d": review["purchase_date"], "v": review["financed_value"], "c": contract_id, "o": notes, "u": user["id"]},
+                    )
+                    for row in review["rows"]:
+                        status = "encerrado" if review["mode"] == "À vista" else "aberto"
+                        commitment_id = insert_id(
+                            """INSERT INTO commitments(contract_id,installment_no,category,description,supplier,total_value,purchase_date,due_date,payment_crop,notes,status,created_by)
+                               VALUES(:contract_id,:installment_no,'Máquinas',:description,:supplier,:total_value,:purchase_date,:due_date,'Caixa',:notes,:status,:created_by)""",
+                            {"contract_id": contract_id, "installment_no": row["number"], "description": f"{review['model']} · Parcela {row['number']}", "supplier": review["supplier"]["name"], "total_value": row["value"], "purchase_date": review["purchase_date"], "due_date": row["due_date"], "notes": notes, "status": status, "created_by": user["id"]},
+                        )
+                        if review["mode"] == "À vista":
+                            insert_id(
+                                """INSERT INTO payments(commitment_id,payment_date,amount,notes,created_by)
+                                   VALUES(:commitment_id,:payment_date,:amount,:notes,:created_by)""",
+                                {"commitment_id": commitment_id, "payment_date": row["due_date"], "amount": row["value"], "notes": "Pagamento à vista", "created_by": user["id"]},
+                            )
+                    log_action(user["id"], "criou", "maquina", machine_id, review["model"])
+                    st.session_state.pop("machine_purchase_review_v31", None)
+                    st.success("Máquina e operação registradas com sucesso.")
+                    st.rerun()
+        st.stop()
 
     tab_new, tab_list = st.tabs(
         ["➕ Cadastrar máquina financiada", "📋 Máquinas cadastradas"]
@@ -2835,6 +3228,109 @@ elif page == "📈 Mercado regional":
                         st.rerun()
 
 
+elif page == "⚙️ Cadastro":
+    st.subheader("Cadastro")
+    st.caption("Cadastre as informações-base que serão reutilizadas nos lançamentos.")
+    if not CAN_EDIT:
+        st.info("Seu perfil permite apenas consulta dos cadastros.")
+
+    company_tab, product_tab, unit_tab = st.tabs(["Empresa", "Produto", "Unidade"])
+
+    with company_tab:
+        if CAN_EDIT:
+            with st.form("new_company", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                company_name = c1.text_input("Nome da empresa")
+                company_document = c2.text_input("CNPJ/CPF (opcional)")
+                c3, c4 = st.columns(2)
+                company_city = c3.text_input("Cidade")
+                company_state = c4.text_input("UF", max_chars=2).upper()
+                save_company = st.form_submit_button("Salvar empresa", use_container_width=True)
+            if save_company:
+                if not company_name.strip():
+                    st.error("Informe o nome da empresa.")
+                else:
+                    try:
+                        company_id = insert_id(
+                            """INSERT INTO companies(name,document,city,state,created_by)
+                               VALUES(:n,:d,:c,:s,:u)""",
+                            {
+                                "n": company_name.strip(),
+                                "d": company_document.strip(),
+                                "c": company_city.strip(),
+                                "s": company_state.strip(),
+                                "u": user["id"],
+                            },
+                        )
+                        log_action(user["id"], "criou", "empresa", company_id, company_name.strip())
+                        st.success("Empresa cadastrada.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível cadastrar. Verifique se a empresa já existe.")
+        companies = q("SELECT name,document,city,state FROM companies WHERE active=TRUE ORDER BY name")
+        if companies:
+            st.dataframe(pd.DataFrame(companies), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Nenhuma empresa cadastrada.")
+
+    with product_tab:
+        units = q("SELECT id,code,description FROM units WHERE active=TRUE ORDER BY code")
+        unit_map = {f"{unit['code']} · {unit.get('description') or unit['code']}": unit["id"] for unit in units}
+        if CAN_EDIT:
+            with st.form("new_product", clear_on_submit=True):
+                product_name = st.text_input("Nome do produto")
+                product_unit = st.selectbox("Unidade padrão", list(unit_map)) if unit_map else None
+                save_product = st.form_submit_button("Salvar produto", use_container_width=True)
+            if save_product:
+                if not product_name.strip() or not product_unit:
+                    st.error("Informe o produto e sua unidade padrão.")
+                else:
+                    try:
+                        product_id = insert_id(
+                            """INSERT INTO products(name,unit_id,created_by)
+                               VALUES(:n,:u,:by)""",
+                            {"n": product_name.strip(), "u": unit_map[product_unit], "by": user["id"]},
+                        )
+                        log_action(user["id"], "criou", "produto", product_id, product_name.strip())
+                        st.success("Produto cadastrado.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível cadastrar. Verifique se o produto já existe.")
+        products = q(
+            """SELECT products.name,units.code AS unit
+               FROM products LEFT JOIN units ON units.id=products.unit_id
+               WHERE products.active=TRUE ORDER BY products.name"""
+        )
+        if products:
+            st.dataframe(pd.DataFrame(products), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Nenhum produto cadastrado.")
+
+    with unit_tab:
+        if CAN_EDIT:
+            with st.form("new_unit", clear_on_submit=True):
+                u1, u2 = st.columns(2)
+                unit_code = u1.text_input("Sigla", max_chars=12).upper()
+                unit_description = u2.text_input("Descrição")
+                save_unit = st.form_submit_button("Salvar unidade", use_container_width=True)
+            if save_unit:
+                if not unit_code.strip():
+                    st.error("Informe a sigla da unidade.")
+                else:
+                    try:
+                        unit_id = insert_id(
+                            """INSERT INTO units(code,description,created_by)
+                               VALUES(:c,:d,:u)""",
+                            {"c": unit_code.strip(), "d": unit_description.strip(), "u": user["id"]},
+                        )
+                        log_action(user["id"], "criou", "unidade", unit_id, unit_code.strip())
+                        st.success("Unidade cadastrada.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível cadastrar. Verifique se a sigla já existe.")
+        units_display = q("SELECT code,description FROM units WHERE active=TRUE ORDER BY code")
+        st.dataframe(pd.DataFrame(units_display), use_container_width=True, hide_index=True)
+
 elif page == "👥 Usuários":
     st.subheader("Usuários da família")
 
@@ -2902,7 +3398,7 @@ elif page == "👥 Usuários":
                 st.rerun()
 
 
-elif page == "📦 Reserva":
+elif page == "📦 BACKUP":
     st.subheader("Backup e conferência")
     st.caption(
         "Baixe este arquivo sempre que quiser guardar uma cópia dos seus dados. "

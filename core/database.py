@@ -54,6 +54,32 @@ def init_db():
             setting_key VARCHAR(120) PRIMARY KEY,
             setting_value TEXT NOT NULL
         )""",
+        f"""CREATE TABLE IF NOT EXISTS companies(
+            id {id_def},
+            name VARCHAR(180) NOT NULL UNIQUE,
+            document VARCHAR(30),
+            city VARCHAR(120),
+            state VARCHAR(2),
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        f"""CREATE TABLE IF NOT EXISTS units(
+            id {id_def},
+            code VARCHAR(12) NOT NULL UNIQUE,
+            description VARCHAR(120),
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        f"""CREATE TABLE IF NOT EXISTS products(
+            id {id_def},
+            name VARCHAR(180) NOT NULL UNIQUE,
+            unit_id INTEGER,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
         f"""CREATE TABLE IF NOT EXISTS auth_sessions(
             id {id_def},
             user_id INTEGER NOT NULL,
@@ -111,6 +137,11 @@ def init_db():
             contract_id INTEGER,
             installment_no INTEGER,
             season_id INTEGER,
+            company_id INTEGER,
+            product_id INTEGER,
+            unit_id INTEGER,
+            quantity NUMERIC(16,3),
+            unit_price NUMERIC(16,2),
             category VARCHAR(80) NOT NULL,
             description VARCHAR(240) NOT NULL,
             supplier VARCHAR(180),
@@ -186,6 +217,22 @@ def init_db():
         ]:
             conn.execute(text(statement))
 
+        default_units = ["UN", "KG", "BG", "LT", "SC", "BD"]
+        for code in default_units:
+            if IS_POSTGRES:
+                conn.execute(
+                    text("""INSERT INTO units(code,description,active)
+                            VALUES(:code,:description,TRUE)
+                            ON CONFLICT(code) DO NOTHING"""),
+                    {"code": code, "description": code},
+                )
+            else:
+                conn.execute(
+                    text("""INSERT OR IGNORE INTO units(code,description,active)
+                            VALUES(:code,:description,TRUE)"""),
+                    {"code": code, "description": code},
+                )
+
     # Migrações para quem já estava usando a versão anterior
     timestamp_column = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP" if IS_POSTGRES else "TIMESTAMP"
     add_missing_column("users", "created_at", timestamp_column)
@@ -200,6 +247,11 @@ def init_db():
     add_missing_column("commitments", "purchase_date", "DATE")
     add_missing_column("commitments", "contract_id", "INTEGER")
     add_missing_column("commitments", "installment_no", "INTEGER")
+    add_missing_column("commitments", "company_id", "INTEGER")
+    add_missing_column("commitments", "product_id", "INTEGER")
+    add_missing_column("commitments", "unit_id", "INTEGER")
+    add_missing_column("commitments", "quantity", "NUMERIC(16,3)")
+    add_missing_column("commitments", "unit_price", "NUMERIC(16,2)")
     add_missing_column("sales", "created_at", timestamp_column)
     add_missing_column("sales", "payment_date", "DATE")
     # Mantém os metadados do Mercado Regional compatíveis entre SQLite e PostgreSQL.
