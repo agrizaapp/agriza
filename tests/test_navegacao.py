@@ -92,6 +92,48 @@ class TestCamposDeSafraNosLancamentos:
         assert linhas[0]["category"] == "Insumos"
 
 
+class TestPaginaCompras:
+    """A remoção do fluxo de compra morto não pode levar junto o que é usado."""
+
+    @pytest.fixture(autouse=True)
+    def compra(self, banco_limpo):
+        from core.database import insert_id, q
+
+        unidade = q("SELECT id FROM units WHERE code='KG'")[0]["id"]
+        insert_id("INSERT INTO companies(name) VALUES('Agro')", {})
+        insert_id("INSERT INTO products(name,unit_id) VALUES('Adubo',:u)", {"u": unidade})
+        safra = insert_id(
+            """INSERT INTO seasons(name,crop,area_ha,cost_ha,yield_sc_ha,margin_pct,active)
+               VALUES('Soja 2026/27','Soja',100,5000,60,20,TRUE)""",
+            {},
+        )
+        insert_id(
+            """INSERT INTO commitments(season_id,category,description,supplier,
+                                       total_value,purchase_date,due_date,status)
+               VALUES(:s,'Insumos','Adubo comprado','Agro',50000,
+                      '2026-07-01','2026-12-01','aberto')""",
+            {"s": safra},
+        )
+
+    def test_nova_compra_continua_funcionando(self):
+        at = _abrir("admin", "🛒 Compras", purchase_show_history=False)
+        assert "Safra" in [s.label for s in at.selectbox]
+
+    def test_historico_lista_a_compra(self):
+        at = _abrir("admin", "🛒 Compras", purchase_show_history=True)
+        assert any("Adubo comprado" in str(e.label) for e in at.expander)
+
+    def test_perfil_consulta_abre_a_pagina(self):
+        """Sem CAN_EDIT o fluxo de lançamento é pulado; a página não pode quebrar."""
+        at = _abrir("consulta", "🛒 Compras", purchase_show_history=False)
+        assert not at.exception
+
+    def test_fluxo_antigo_nao_reaparece(self):
+        at = _abrir("admin", "🛒 Compras", purchase_show_history=False)
+        rotulos = [str(r.label) for r in at.radio]
+        assert "Como foi a compra?" not in rotulos
+
+
 class TestPaginaMaquinas:
     """A remoção do 'Financiamento avançado' não pode levar junto a listagem."""
 
