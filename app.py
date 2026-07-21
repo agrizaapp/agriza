@@ -28,6 +28,8 @@ from services.auth import (
 )
 from services.voice_sales import parse_spoken_sale
 from services.voice_purchases import parse_spoken_purchase
+from services.market_data import build_market_view
+from services.market_data.sources import available_sources, planned_sources, collect
 try:
     from market_prices import update_regional_quotes, latest_quote_for_crop
 except ModuleNotFoundError:
@@ -3390,6 +3392,95 @@ elif page == "📈 Mercado regional":
                 )
             else:
                 cols[index].metric(crop_name, "Sem cotação")
+
+    # ----- Inteligência de mercado -------------------------------------------
+    st.markdown("### 📊 Inteligência de mercado")
+    st.caption(
+        "Como o preço de cada cultura se comporta ao longo do tempo: posição no "
+        "histórico, médias móveis e tendência. Quanto mais cotações registradas, "
+        "mais rica a leitura."
+    )
+    NIVEL_MERCADO = {
+        "favoravel": ("positive", "🟢 Favorável"),
+        "cautela": ("warning", "🟡 Cautela"),
+        "desfavoravel": ("danger", "🔴 Desfavorável"),
+        "sem_dados": ("warning", "⚪ Sem dados"),
+    }
+    analysis_crop = st.selectbox(
+        "Cultura para analisar", ["Soja", "Milho", "Trigo", "Canola"],
+        key="market_analysis_crop",
+    )
+    required_for_crop = None
+    ref_season = q(
+        """SELECT * FROM seasons
+           WHERE active=TRUE AND lower(crop)=lower(:crop)
+           ORDER BY id DESC LIMIT 1""",
+        {"crop": analysis_crop},
+    )
+    if ref_season:
+        required_for_crop = season_summary(ref_season[0])["required_price"]
+
+    view = build_market_view(analysis_crop, required_for_crop)
+    summary = view["summary"]
+    signal = view["signal"]
+
+    if summary["count"] < 2:
+        st.info(
+            f"Ainda há poucos registros de {analysis_crop} "
+            f"({summary['count']} cotação(ões)). Registre mais preços — "
+            "manualmente ou por uma fonte — para liberar os indicadores."
+        )
+    else:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Preço atual", money(summary["current"]) + "/sc")
+        if summary["percentile"] is not None:
+            m2.metric("Posição no histórico", f"{num(summary['percentile'], 0)}º pct")
+        if summary["sma_short"] is not None:
+            m3.metric("Média curta", money(summary["sma_short"]))
+        seta = {"alta": "↑", "baixa": "↓", "estável": "→"}.get(summary["trend"], "—")
+        m4.metric("Tendência", f"{seta} {summary['trend']}")
+
+        level_class, level_label = NIVEL_MERCADO.get(signal["level"], ("warning", ""))
+        pct_line = ""
+        if signal.get("suggested_sell_pct"):
+            pct_line = (
+                f"<br><b>Cenário sugerido:</b> avaliar proteção de ~"
+                f"{signal['suggested_sell_pct']}% da produção."
+            )
+        st.markdown(
+            f"""<div class="card {level_class}">
+            <small>LEITURA DE MERCADO · {level_label}</small>
+            <h3>{signal['headline']}</h3>
+            <div>{signal['message']}{pct_line}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+        with st.expander("Ver os fatores considerados"):
+            for factor in signal["factors"]:
+                st.write("•", factor)
+            st.caption(
+                f"Baseado em {summary['count']} cotações dos últimos meses. "
+                "É apoio à decisão sobre venda de grão físico, não recomendação "
+                "de operação financeira — a decisão é sua."
+            )
+
+    with st.expander("🌐 Fontes de dados"):
+        st.caption("Fontes conectadas e planejadas para alimentar a série de preços.")
+        for source in available_sources():
+            fonte_cols = st.columns([3, 1])
+            fonte_cols[0].write(f"**{source.label}** · {source.note}")
+            if CAN_EDIT and fonte_cols[1].button(
+                "Atualizar", key=f"collect_{source.key}", use_container_width=True
+            ):
+                with st.spinner(f"Consultando {source.label}..."):
+                    result = collect(source.key, user_id=user["id"])
+                if result["updated"]:
+                    st.success(f"{len(result['updated'])} cotações atualizadas.")
+                for error in result["errors"]:
+                    st.warning(error)
+                st.rerun()
+        for source in planned_sources():
+            st.write(f"🔜 **{source.label}** · {source.note} _(planejada)_")
 
     if CAN_EDIT:
         with st.expander("✏️ Informar ou corrigir preço", expanded=False):

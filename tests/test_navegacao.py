@@ -90,3 +90,20 @@ class TestCamposDeSafraNosLancamentos:
         assert linhas[0]["season_id"] is not None, "compra gravada sem vinculo de safra"
         assert float(linhas[0]["total_value"]) == 5000.0
         assert linhas[0]["category"] == "Insumos"
+
+
+class TestPaginaMercado:
+    def test_renderiza_sem_dados(self, banco_limpo):
+        at = _abrir("admin", "📈 Mercado regional")
+        assert any("Inteligência de mercado" in str(m.value) for m in at.markdown)
+
+    def test_painel_com_serie_mostra_indicadores(self, banco_limpo):
+        from services.market_data.history import record_quote
+
+        for preco in [90, 95, 100, 105, 110, 115, 120]:
+            record_quote("Soja", preco, source="teste")
+        at = _abrir("admin", "📈 Mercado regional", market_analysis_crop="Soja")
+        assert not at.exception, [e.value for e in at.exception]
+        rotulos = [m.label for m in at.metric]
+        assert "Posição no histórico" in rotulos
+        assert "Tendência" in rotulos
