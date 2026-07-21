@@ -92,6 +92,38 @@ class TestCamposDeSafraNosLancamentos:
         assert linhas[0]["category"] == "Insumos"
 
 
+class TestPaginaMaquinas:
+    """A remoção do 'Financiamento avançado' não pode levar junto a listagem."""
+
+    @pytest.fixture(autouse=True)
+    def maquina(self, banco_limpo):
+        from core.database import insert_id
+
+        insert_id("INSERT INTO companies(name) VALUES('Fornecedor X')", {})
+        contrato = insert_id(
+            """INSERT INTO purchase_contracts(description,supplier,category,total_value,status)
+               VALUES('Trator','Fornecedor X','Máquinas',300000,'aberto')""",
+            {},
+        )
+        insert_id(
+            """INSERT INTO machinery(name,model,contract_id,status)
+               VALUES('Trator','Trator X',:c,'ativo')""",
+            {"c": contrato},
+        )
+
+    def test_lista_maquinas_cadastradas(self):
+        at = _abrir("admin", "🚜 Máquinas e financiamentos",
+                    machine_screen_v31="📋 Máquinas cadastradas")
+        texto = " ".join(str(m.value) for m in at.markdown)
+        assert "Trator" in texto
+
+    def test_nao_existe_mais_aba_de_financiamento_avancado(self):
+        at = _abrir("admin", "🚜 Máquinas e financiamentos",
+                    machine_screen_v31="📋 Máquinas cadastradas")
+        rotulos = " ".join(str(m.value) for m in at.markdown)
+        assert "Financiamento avançado" not in rotulos
+
+
 class TestPaginaMercado:
     def test_renderiza_sem_dados(self, banco_limpo):
         at = _abrir("admin", "📈 Mercado regional")
