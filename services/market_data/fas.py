@@ -36,6 +36,11 @@ ROTAS_DE_REFERENCIA = (
 LIMITE_DE_AMOSTRA = 2
 LIMITE_DE_TEXTO = 120
 
+# Confirmado pelo diagnóstico em produção: a FAS aceita a chave por query
+# string (`?api_key=`). A rota /commodities devolve uma lista de objetos com
+# `commodityCode` e `commodityName` — nomes em inglês.
+FORMA_DE_AUTENTICACAO = "query api_key"
+
 
 def tem_chave():
     return bool(os.getenv(VARIAVEL_DE_AMBIENTE, "").strip())
@@ -89,6 +94,25 @@ def resumir_estrutura(payload):
         return resumo
 
     return {"tipo": type(payload).__name__, "amostra": _encurtar(payload)}
+
+
+def filtrar_por_termo(itens, termo):
+    """Filtra registros procurando o termo em qualquer valor de texto.
+
+    Busca sobre os valores, e não sobre nomes de campo fixos: assim funciona
+    independentemente de como a API nomeia as colunas, e não quebra se algum
+    nome mudar.
+    """
+    termo = (termo or "").strip().lower()
+    if not termo:
+        return list(itens)
+    encontrados = []
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        if any(termo in str(valor).lower() for valor in item.values()):
+            encontrados.append(item)
+    return encontrados
 
 
 def _tentativas(rota):
@@ -154,3 +178,57 @@ def diagnosticar(rota="commodities", *, timeout=25):
         "Nenhuma das formas de autenticação funcionou. Veja os status acima."
     )
     return relatorio
+
+
+def _consultar(caminho, *, timeout=25):
+    """GET autenticado na forma já confirmada em produção. Nunca lança.
+
+    Devolve ``(payload, erros)``.
+    """
+    if not tem_chave():
+        return None, [
+            f"A variável {VARIAVEL_DE_AMBIENTE} não está configurada neste ambiente."
+        ]
+    import requests
+
+    try:
+        resposta = requests.get(
+            f"{BASE_URL}/{caminho}",
+            params={"api_key": os.getenv(VARIAVEL_DE_AMBIENTE, "").strip()},
+            headers={"User-Agent": "AGRIZA/3.1"},
+            timeout=timeout,
+        )
+    except Exception as erro:
+        return None, [f"Falha ao consultar a FAS: {_ocultar_chave(erro)}"]
+
+    if resposta.status_code != 200:
+        return None, [
+            f"FAS respondeu HTTP {resposta.status_code}: "
+            f"{_ocultar_chave(resposta.text)[:160]}"
+        ]
+    try:
+        return resposta.json(), []
+    except Exception:
+        return None, ["FAS respondeu algo que não é JSON."]
+
+
+def buscar_commodities(termo=""):
+    """Catálogo de commodities, opcionalmente filtrado.
+
+    Serve para descobrir o código real de soja, milho e trigo — em vez de
+    chutar, que foi o erro que quase cometi antes.
+    """
+    payload, erros = _consultar("commodities")
+    if erros:
+        return [], erros
+    itens = payload if isinstance(payload, list) else payload.get("data", [])
+    return filtrar_por_termo(itens, termo), []
+
+
+def diagnosticar_dados(commodity_code, country_code="BR", year=2024):
+    """Inspeciona a rota de dados — é dela que sai o balanço de oferta."""
+    caminho = f"commodity/{commodity_code}/country/{country_code}/year/{year}"
+    payload, erros = _consultar(caminho)
+    if erros:
+        return {"caminho": caminho, "estrutura": None, "erros": erros}
+    return {"caminho": caminho, "estrutura": resumir_estrutura(payload), "erros": []}
