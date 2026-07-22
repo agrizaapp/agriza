@@ -64,6 +64,17 @@ except ModuleNotFoundError:
         return None
 
 
+# Marca as baixas feitas pela tela de contas, para que reabrir uma conta remova
+# apenas o que esta tela criou — pagamentos lançados em outro lugar são do
+# produtor e não podem desaparecer.
+NOTA_BAIXA = "Baixa integral pela tela de contas"
+
+
+def _conta_esta_paga(account, payment):
+    """Uma conta está paga quando nada resta a cobrir ou já foi encerrada."""
+    return payment["remaining"] <= 0.01 or account.get("status") == "encerrado"
+
+
 def confirmation_card(title, rows, total_label=None, total_value=None, warnings=None):
     st.markdown(f"### {title}")
     for label, value in rows:
@@ -853,12 +864,13 @@ elif page == "🧾 Contas e pagamentos":
            ORDER BY due_date,id DESC"""
     )
     account_rows = []
+    contas_visiveis = []
     account_statuses = commitment_statuses()
     open_count = 0
     paid_count = 0
     for account in accounts:
         payment = account_statuses[account["id"]]
-        is_paid = payment["remaining"] <= 0.01 or account.get("status") == "encerrado"
+        is_paid = _conta_esta_paga(account, payment)
         if is_paid:
             paid_count += 1
         else:
@@ -867,6 +879,7 @@ elif page == "🧾 Contas e pagamentos":
             continue
         if account_filter == "Pagas" and not is_paid:
             continue
+        contas_visiveis.append(account)
         account_rows.append(
             {
                 "Descrição": account["description"],
@@ -893,66 +906,108 @@ elif page == "🧾 Contas e pagamentos":
         st.dataframe(pd.DataFrame(account_rows), use_container_width=True, hide_index=True)
     else:
         st.info("Não há contas nesta situação.")
-    if CAN_EDIT:
-        payable_accounts = [
-            account for account in accounts
-            if account_statuses[account["id"]]["remaining"] > 0.01
-            and account_filter in ("A pagar", "Todas")
-        ]
-        if payable_accounts:
-            st.markdown("### Baixar parcela paga")
-            st.caption("Use este botão somente quando a parcela tiver sido quitada integralmente.")
-            for account in payable_accounts:
-                payment = account_statuses[account["id"]]
-                p1, p2 = st.columns([3, 1])
-                p1.write(
-                    f"**{account['description']}** · vence em {br_date(account.get('due_date'))} "
-                    f"· falta {money(payment['remaining'])}"
-                )
-                if p2.button("✅ Marcar como paga", key=f"pay_full_account_{account['id']}"):
-                    st.session_state[f"confirm_full_payment_{account['id']}"] = True
+    if CAN_EDIT and contas_visiveis:
+        st.markdown("### Conferir pagamentos")
+        st.caption(
+            "Marque o que já foi pago e desmarque o que precisa voltar a aparecer "
+            "como aberto. Nada é gravado antes de você confirmar."
+        )
+
+        marcacoes = {}
+        for account in contas_visiveis:
+            payment = account_statuses[account["id"]]
+            paga_agora = _conta_esta_paga(account, payment)
+            rotulo = (
+                f"{account['description']} · vence {br_date(account.get('due_date'))} "
+                f"· {money(account['total_value'])}"
+            )
+            if not paga_agora and payment["remaining"] < float(account["total_value"]):
+                rotulo += f" · falta {money(payment['remaining'])}"
+            marcacoes[account["id"]] = st.checkbox(
+                rotulo, value=paga_agora, key=f"conta_paga_{account['id']}"
+            )
+
+        a_pagar, a_reabrir = [], []
+        for account in contas_visiveis:
+            payment = account_statuses[account["id"]]
+            paga_agora = _conta_esta_paga(account, payment)
+            marcada = marcacoes[account["id"]]
+            if marcada and not paga_agora:
+                a_pagar.append(account)
+            elif not marcada and paga_agora:
+                a_reabrir.append(account)
+
+        if a_pagar or a_reabrir:
+            st.markdown("---")
+            confirmation_card(
+                "🧾 Revise antes de confirmar",
+                [
+                    (
+                        "Marcar como pagas",
+                        ", ".join(c["description"] for c in a_pagar) or "nenhuma",
+                    ),
+                    (
+                        "Reabrir como em aberto",
+                        ", ".join(c["description"] for c in a_reabrir) or "nenhuma",
+                    ),
+                ],
+                "Total a baixar",
+                money(sum(account_statuses[c["id"]]["remaining"] for c in a_pagar)),
+                warnings=(
+                    ["Reabrir uma conta remove a baixa registrada por esta tela."]
+                    if a_reabrir else None
+                ),
+            )
+            conf1, conf2 = st.columns(2)
+            confirmar = conf1.button(
+                "✅ Confirmar alterações", key="confirmar_checklist_contas",
+                type="primary", use_container_width=True,
+            )
+            descartar = conf2.button(
+                "↩️ Descartar", key="descartar_checklist_contas",
+                use_container_width=True,
+            )
+
+            if descartar:
+                for account in contas_visiveis:
+                    st.session_state.pop(f"conta_paga_{account['id']}", None)
+                st.rerun()
+
+            if confirmar:
+                try:
+                    for account in a_pagar:
+                        restante = float(account_statuses[account["id"]]["remaining"])
+                        insert_id(
+                            """INSERT INTO payments
+                               (commitment_id,payment_date,amount,notes,created_by)
+                               VALUES(:c,:d,:a,:n,:u)""",
+                            {
+                                "c": account["id"], "d": date.today(),
+                                "a": restante, "n": NOTA_BAIXA, "u": user["id"],
+                            },
+                        )
+                        ex("UPDATE commitments SET status='encerrado' WHERE id=:id",
+                           {"id": account["id"]})
+                        log_action(user["id"], "pagou", "compromisso",
+                                   account["id"], money(restante))
+                    for account in a_reabrir:
+                        # Remove apenas as baixas feitas por esta tela: pagamentos
+                        # lançados em outro lugar são do produtor e não podem sumir.
+                        ex("DELETE FROM payments WHERE commitment_id=:c AND notes=:n",
+                           {"c": account["id"], "n": NOTA_BAIXA})
+                        ex("UPDATE commitments SET status='aberto' WHERE id=:id",
+                           {"id": account["id"]})
+                        log_action(user["id"], "reabriu", "compromisso",
+                                   account["id"], account["description"])
+                    for account in contas_visiveis:
+                        st.session_state.pop(f"conta_paga_{account['id']}", None)
+                    st.success(
+                        f"{len(a_pagar)} conta(s) baixada(s) e "
+                        f"{len(a_reabrir)} reaberta(s)."
+                    )
                     st.rerun()
-                if st.session_state.get(f"confirm_full_payment_{account['id']}"):
-                    st.warning(
-                        f"Confirmar a baixa integral de {money(payment['remaining'])} "
-                        f"em {account['description']}?"
-                    )
-                    confirm_col, cancel_col = st.columns(2)
-                    confirm_payment = confirm_col.button(
-                        "Confirmar pagamento",
-                        key=f"confirm_full_payment_action_{account['id']}",
-                        type="primary",
-                        use_container_width=True,
-                    )
-                    cancel_payment = cancel_col.button(
-                        "Cancelar",
-                        key=f"cancel_full_payment_action_{account['id']}",
-                        use_container_width=True,
-                    )
-                    if cancel_payment:
-                        st.session_state.pop(f"confirm_full_payment_{account['id']}", None)
-                        st.rerun()
-                    if confirm_payment:
-                        st.session_state.pop(f"confirm_full_payment_{account['id']}", None)
-                        try:
-                            insert_id(
-                                """INSERT INTO payments
-                                   (commitment_id,payment_date,amount,notes,created_by)
-                                   VALUES(:c,:d,:a,:n,:u)""",
-                                {
-                                    "c": account["id"],
-                                    "d": date.today(),
-                                    "a": float(payment["remaining"]),
-                                    "n": "Baixa integral pela tela de contas",
-                                    "u": user["id"],
-                                },
-                            )
-                            ex("UPDATE commitments SET status='encerrado' WHERE id=:id", {"id": account["id"]})
-                            log_action(user["id"], "pagou", "compromisso", account["id"], money(payment["remaining"]))
-                            st.success("Parcela marcada como paga.")
-                            st.rerun()
-                        except Exception:
-                            st.error("Não foi possível registrar o pagamento. Tente novamente.")
+                except Exception:
+                    st.error("Não foi possível salvar as alterações. Nada foi gravado pela metade — confira e tente de novo.")
     if st.button("← Voltar para lançamentos", key="back_to_launch_from_accounts"):
         st.session_state.current_page = "📝 Lançar / Visualizar"
         st.rerun()
