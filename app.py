@@ -38,8 +38,11 @@ from services.market_data.fundamentals import (
 )
 from services.market_data.fundamentals_store import leitura_de_oferta, serie_anual
 from services.market_data.fas import (
+    COMMODITY_POR_CULTURA as COMMODITY_FAS,
+    PAISES_DE_INTERESSE,
     ROTAS_DE_REFERENCIA as ROTAS_FAS,
     buscar_commodities as buscar_commodities_fas,
+    coletar as coletar_fas,
     diagnosticar as diagnosticar_fas,
     diagnosticar_dados as diagnosticar_dados_fas,
     tem_chave as fas_tem_chave,
@@ -2766,6 +2769,39 @@ elif page == "📈 Mercado regional":
         else:
             st.caption(f"O USDA não cobre {analysis_crop.lower()} nesta integração.")
 
+        # Balanço mundial (FAS): produção por país, quando já coletado.
+        codigo_fas = COMMODITY_FAS.get(analysis_crop)
+        if codigo_fas:
+            mundiais = q(
+                """SELECT region, year, value, unit, statistic
+                   FROM fundamentals
+                   WHERE source='FAS' AND commodity=:c
+                     AND lower(statistic) LIKE '%production%'
+                   ORDER BY year, region""",
+                {"c": codigo_fas},
+            )
+            if mundiais:
+                st.markdown("---")
+                st.markdown(f"**🌎 Produção mundial de {analysis_crop.lower()}**")
+                tabela = pd.DataFrame([
+                    {
+                        "Ano": int(linha["year"]),
+                        "País": PAISES_DE_INTERESSE.get(linha["region"], linha["region"]),
+                        "Produção": float(linha["value"]),
+                    }
+                    for linha in mundiais
+                ])
+                pivo = tabela.pivot_table(
+                    index="Ano", columns="País", values="Produção", aggfunc="sum"
+                )
+                st.line_chart(pivo, use_container_width=True)
+                unidade = mundiais[0].get("unit") or ""
+                st.caption(
+                    f"Fonte: USDA/FAS PSD · unidade {unidade}. "
+                    "Compare a safra brasileira com a dos concorrentes: quando a "
+                    "oferta mundial cresce, o preço tende a ceder."
+                )
+
     if user["role"] == "admin":
         with st.expander("🌐 Diagnóstico da FAS PSD (balanço mundial)"):
             st.caption(
@@ -2844,16 +2880,39 @@ elif page == "📈 Mercado regional":
                     if rel_dados.get("estrutura"):
                         st.json(rel_dados["estrutura"])
 
-                st.info(
-                    "⚠️ **Desligue a tradução automática do navegador** antes de "
-                    "copiar. Ela renomeia os campos na tela e eu preciso dos nomes "
-                    "originais em inglês. No Chrome: clique com o botão direito → "
-                    "*Traduzir para o português* para desativar.",
-                )
+                st.markdown("---")
+                st.markdown("**3. Coletar o balanço mundial**")
                 st.caption(
-                    "Copie o bloco e me envie — não há chave nem dado pessoal, "
-                    "apenas a forma da resposta."
+                    "Busca soja, milho e trigo para Brasil, EUA, Argentina e China. "
+                    "Os rótulos dos indicadores são traduzidos automaticamente a "
+                    "partir dos catálogos da FAS — o resultado aparece abaixo para "
+                    "você conferir se bateu."
                 )
+                if st.button("🌎 Coletar dados mundiais", key="coletar_fas",
+                             use_container_width=True, type="primary"):
+                    with st.spinner("Consultando a FAS... isso leva alguns minutos."):
+                        resultado_fas = coletar_fas(user_id=user["id"])
+                    st.session_state.fas_coleta = resultado_fas
+
+                coleta = st.session_state.get("fas_coleta")
+                if coleta:
+                    if coleta["gravados"]:
+                        st.success(f"{coleta['gravados']} observações gravadas.")
+                    for erro in coleta["erros"][:5]:
+                        st.warning(erro)
+                    if coleta.get("atributos"):
+                        st.markdown("**Tradução dos indicadores:**")
+                        st.dataframe(
+                            pd.DataFrame(
+                                [{"ID": k, "Indicador": v}
+                                 for k, v in sorted(coleta["atributos"].items())]
+                            ),
+                            use_container_width=True, hide_index=True, height=200,
+                        )
+                        st.caption(
+                            "Se esta tabela vier com rótulos sem sentido, a tradução "
+                            "falhou — me avise antes de confiar nos números."
+                        )
 
     if CAN_EDIT:
         with st.expander("📥 Importar histórico de preços (planilha)"):

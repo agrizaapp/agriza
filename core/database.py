@@ -234,8 +234,11 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_quotes_crop_date ON quotes(crop, quoted_at)",
             "CREATE INDEX IF NOT EXISTS idx_companies_name ON companies(name)",
             "CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)",
-            """CREATE UNIQUE INDEX IF NOT EXISTS idx_fundamentals_unico
-               ON fundamentals(source,commodity,statistic,year)""",
+            # O índice precisa incluir a região: o NASS traz só os EUA, mas a
+            # FAS traz vários países para a mesma safra, e sem a região Brasil
+            # e Argentina colidiriam. O índice antigo é derrubado abaixo.
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_fundamentals_unico_v2
+               ON fundamentals(source,commodity,statistic,region,year)""",
         ]:
             conn.execute(text(statement))
 
@@ -276,6 +279,14 @@ def init_db():
     add_missing_column("commitments", "unit_price", "NUMERIC(16,2)")
     add_missing_column("sales", "created_at", timestamp_column)
     add_missing_column("sales", "payment_date", "DATE")
+    # Remove o índice antigo de fundamentals, que não considerava a região e
+    # impedia guardar o mesmo indicador para países diferentes. Derrubar índice
+    # não apaga dado — as linhas permanecem intactas.
+    try:
+        ex("DROP INDEX IF EXISTS idx_fundamentals_unico")
+    except Exception:
+        pass
+
     # Garante as colunas de catálogo que o aplicativo realmente consulta, caso o
     # banco tenha nascido de uma versão anterior do esquema.
     add_missing_column("products", "unit_id", "INTEGER")

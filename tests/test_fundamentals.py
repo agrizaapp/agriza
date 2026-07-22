@@ -102,6 +102,22 @@ class TestPersistencia:
         serie = serie_anual("SOYBEANS", "YIELD")
         assert [i["ano"] for i in serie] == [2020, 2021, 2022]
 
+    def test_mesmo_indicador_para_paises_diferentes(self, banco_limpo):
+        """Regressão: o índice único não incluía a região.
+
+        Com o NASS (só EUA) passava despercebido, mas a FAS traz vários países
+        para a mesma safra — Brasil e Argentina colidiam na gravação.
+        """
+        from core.database import q
+
+        for pais, valor in [("BR", 153000.0), ("US", 113000.0), ("AR", 48000.0)]:
+            salvar_fundamento({
+                "commodity": "2222000", "statistic": "Production",
+                "unidade": "(1000 MT)", "regiao": pais, "ano": 2024, "valor": valor,
+            }, fonte="FAS")
+        linhas = q("SELECT region FROM fundamentals WHERE source='FAS'")
+        assert sorted(l["region"] for l in linhas) == ["AR", "BR", "US"]
+
     def test_recoletar_atualiza_em_vez_de_duplicar(self, banco_limpo):
         self._gravar(2024, 50.0)
         self._gravar(2024, 53.0)  # USDA revisou o numero
