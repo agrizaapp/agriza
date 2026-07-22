@@ -42,6 +42,13 @@ class TestChecklist:
         assert at.checkbox[0].value is False
         assert "Adubo NPK" in at.checkbox[0].label
 
+    def test_rotulo_enxuto_cabe_no_celular(self, conta):
+        """Descrição · data · valor. Vencimento e saldo ficam na tabela acima."""
+        at = _abrir()
+        rotulo = at.checkbox[0].label
+        assert rotulo == "Adubo NPK · 01/12/2026 · R$ 50.000,00"
+        assert "vence" not in rotulo and "falta" not in rotulo
+
     def test_marcar_nao_grava_sem_confirmar(self, conta):
         """Regra do projeto: nada é gravado antes da confirmação."""
         at = _abrir()

@@ -917,12 +917,12 @@ elif page == "🧾 Contas e pagamentos":
         for account in contas_visiveis:
             payment = account_statuses[account["id"]]
             paga_agora = _conta_esta_paga(account, payment)
+            # Rótulo enxuto: cabe numa linha no celular. Vencimento e saldo em
+            # aberto continuam visíveis na tabela logo acima.
             rotulo = (
-                f"{account['description']} · vence {br_date(account.get('due_date'))} "
+                f"{account['description']} · {br_date(account.get('due_date'))} "
                 f"· {money(account['total_value'])}"
             )
-            if not paga_agora and payment["remaining"] < float(account["total_value"]):
-                rotulo += f" · falta {money(payment['remaining'])}"
             marcacoes[account["id"]] = st.checkbox(
                 rotulo, value=paga_agora, key=f"conta_paga_{account['id']}"
             )
