@@ -37,6 +37,11 @@ from services.market_data.fundamentals import (
     tem_chave as usda_tem_chave,
 )
 from services.market_data.fundamentals_store import leitura_de_oferta, serie_anual
+from services.market_data.fas import (
+    ROTAS_DE_REFERENCIA as ROTAS_FAS,
+    diagnosticar as diagnosticar_fas,
+    tem_chave as fas_tem_chave,
+)
 try:
     from market_prices import update_regional_quotes, latest_quote_for_crop
 except ModuleNotFoundError:
@@ -2758,6 +2763,51 @@ elif page == "📈 Mercado regional":
                 )
         else:
             st.caption(f"O USDA não cobre {analysis_crop.lower()} nesta integração.")
+
+    if user["role"] == "admin":
+        with st.expander("🌐 Diagnóstico da FAS PSD (balanço mundial)"):
+            st.caption(
+                "A FAS traz produção, produtividade e estoques **por país** — o "
+                "cenário mundial, não só os EUA. A documentação do formato dela "
+                "fica atrás da chave, então este passo descobre a estrutura real "
+                "antes de eu escrever a leitura definitiva."
+            )
+            if not fas_tem_chave():
+                st.info(
+                    "A variável `FAS_API_KEY` não está configurada **neste ambiente**. "
+                    "Em produção ela vive nas variáveis do Render."
+                )
+            else:
+                rota = st.selectbox(
+                    "Rota para inspecionar", list(ROTAS_FAS), key="fas_rota_diagnostico"
+                )
+                if st.button("🔍 Executar diagnóstico", key="rodar_diagnostico_fas",
+                             use_container_width=True):
+                    with st.spinner("Consultando a FAS..."):
+                        relatorio = diagnosticar_fas(rota)
+                    st.session_state.fas_relatorio = relatorio
+
+            relatorio = st.session_state.get("fas_relatorio")
+            if relatorio:
+                if relatorio.get("forma_que_funcionou"):
+                    st.success(
+                        f"Conectou usando: **{relatorio['forma_que_funcionou']}**"
+                    )
+                for tentativa in relatorio["tentativas"]:
+                    st.write(
+                        f"• `{tentativa['forma']}` → HTTP {tentativa['status']} "
+                        f"— {tentativa.get('detalhe', '')}"
+                    )
+                for erro in relatorio["erros"]:
+                    st.warning(erro)
+                if relatorio.get("estrutura"):
+                    st.markdown("**Estrutura da resposta:**")
+                    st.json(relatorio["estrutura"])
+                    st.caption(
+                        "Copie este bloco e me envie — é com ele que eu escrevo a "
+                        "leitura definitiva, sem adivinhar formato. Não há chave "
+                        "nem dado pessoal aqui, apenas a forma da resposta."
+                    )
 
     if CAN_EDIT:
         with st.expander("📥 Importar histórico de preços (planilha)"):
