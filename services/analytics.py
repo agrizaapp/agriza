@@ -155,6 +155,18 @@ def agroia_recommendation(season):
         details.append(f"Cenário de mercado: {market['headline'].lower()}.")
         details.extend(market["factors"][1:])  # o preço atual já consta acima
 
+    # Fundamento de oferta: entra como razão explícita, não como gatilho de
+    # decisão. O nível continua ancorado em preço e pressão de caixa, que são
+    # os dados do próprio produtor — o fundamento explica o pano de fundo.
+    fundamento = _fundamento_de_oferta(season["crop"])
+    if fundamento:
+        details.append(
+            f"Safra americana {fundamento['ano']}: produtividade "
+            f"{fundamento['leitura']} ({fundamento['variacao_pct']:+.1f}% "
+            f"frente à média de {fundamento['anos_considerados'] - 1} anos), "
+            f"o que {fundamento['efeito']}."
+        )
+
     if quote >= required and sold_pct < 40:
         pct = 10 if uncovered > 0 else 5
         return {
@@ -207,4 +219,24 @@ def _market_context(crop, required_price):
     if signal["level"] == "sem_dados" or view["summary"]["count"] < 3:
         return None
     return signal
+
+
+def _fundamento_de_oferta(crop):
+    """Leitura de oferta da cultura (safra americana), ou ``None``.
+
+    Assim como o contexto de mercado, nunca derruba a recomendação: sem dados,
+    sem módulo ou com erro, devolve ``None`` e o resto segue.
+    """
+    try:
+        from services.market_data.fundamentals import COMMODITY_POR_CULTURA
+        from services.market_data.fundamentals_store import leitura_de_oferta
+    except Exception:
+        return None
+    commodity = COMMODITY_POR_CULTURA.get(crop)
+    if not commodity:
+        return None
+    try:
+        return leitura_de_oferta(commodity, "YIELD")
+    except Exception:
+        return None
 
