@@ -39,7 +39,9 @@ from services.market_data.fundamentals import (
 from services.market_data.fundamentals_store import leitura_de_oferta, serie_anual
 from services.market_data.fas import (
     ROTAS_DE_REFERENCIA as ROTAS_FAS,
+    buscar_commodities as buscar_commodities_fas,
     diagnosticar as diagnosticar_fas,
+    diagnosticar_dados as diagnosticar_dados_fas,
     tem_chave as fas_tem_chave,
 )
 try:
@@ -2803,11 +2805,55 @@ elif page == "📈 Mercado regional":
                 if relatorio.get("estrutura"):
                     st.markdown("**Estrutura da resposta:**")
                     st.json(relatorio["estrutura"])
-                    st.caption(
-                        "Copie este bloco e me envie — é com ele que eu escrevo a "
-                        "leitura definitiva, sem adivinhar formato. Não há chave "
-                        "nem dado pessoal aqui, apenas a forma da resposta."
-                    )
+
+            if fas_tem_chave():
+                st.markdown("---")
+                st.markdown("**1. Descobrir o código da cultura**")
+                termo = st.text_input(
+                    "Procurar no catálogo", value="soybean",
+                    key="fas_busca_commodity",
+                    help="Os nomes da FAS são em inglês: soybean, corn, wheat.",
+                )
+                if st.button("🔎 Procurar", key="buscar_commodity_fas",
+                             use_container_width=True):
+                    achados, erros_busca = buscar_commodities_fas(termo)
+                    for erro in erros_busca:
+                        st.warning(erro)
+                    if achados:
+                        st.dataframe(pd.DataFrame(achados),
+                                     use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Nada encontrado com esse termo.")
+
+                st.markdown("**2. Inspecionar a rota de dados**")
+                d1, d2, d3 = st.columns(3)
+                codigo = d1.text_input("Código da commodity", value="",
+                                       key="fas_codigo_dados")
+                pais = d2.text_input("País (sigla)", value="BR", key="fas_pais_dados")
+                ano = d3.number_input("Ano", min_value=1960, max_value=2100,
+                                      value=2024, step=1, key="fas_ano_dados")
+                if st.button("🔬 Inspecionar dados", key="inspecionar_dados_fas",
+                             use_container_width=True, disabled=not codigo.strip()):
+                    with st.spinner("Consultando a FAS..."):
+                        rel_dados = diagnosticar_dados_fas(
+                            codigo.strip(), pais.strip().upper() or "BR", int(ano)
+                        )
+                    st.caption(f"Rota: `{rel_dados['caminho']}`")
+                    for erro in rel_dados["erros"]:
+                        st.warning(erro)
+                    if rel_dados.get("estrutura"):
+                        st.json(rel_dados["estrutura"])
+
+                st.info(
+                    "⚠️ **Desligue a tradução automática do navegador** antes de "
+                    "copiar. Ela renomeia os campos na tela e eu preciso dos nomes "
+                    "originais em inglês. No Chrome: clique com o botão direito → "
+                    "*Traduzir para o português* para desativar.",
+                )
+                st.caption(
+                    "Copie o bloco e me envie — não há chave nem dado pessoal, "
+                    "apenas a forma da resposta."
+                )
 
     if CAN_EDIT:
         with st.expander("📥 Importar histórico de preços (planilha)"):

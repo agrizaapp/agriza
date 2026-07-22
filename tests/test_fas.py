@@ -52,6 +52,49 @@ class TestResumoDeEstrutura:
         assert len(r["amostra"]) == fas.LIMITE_DE_AMOSTRA
 
 
+class TestFiltroDeCatalogo:
+    """Busca sobre os valores, não sobre nomes de campo fixos.
+
+    Isso importa porque os nomes vieram traduzidos na primeira inspeção — o
+    filtro não pode depender de um nome específico de coluna.
+    """
+
+    CATALOGO = [
+        {"commodityCode": "2222000", "commodityName": "Oilseed, Soybean"},
+        {"commodityCode": "0440000", "commodityName": "Corn"},
+        {"commodityCode": "0410000", "commodityName": "Wheat"},
+    ]
+
+    def test_encontra_por_nome(self):
+        from services.market_data.fas import filtrar_por_termo
+
+        achados = filtrar_por_termo(self.CATALOGO, "soybean")
+        assert len(achados) == 1
+        assert achados[0]["commodityCode"] == "2222000"
+
+    def test_busca_e_indiferente_a_maiusculas(self):
+        from services.market_data.fas import filtrar_por_termo
+
+        assert len(filtrar_por_termo(self.CATALOGO, "CORN")) == 1
+
+    def test_encontra_por_codigo(self):
+        from services.market_data.fas import filtrar_por_termo
+
+        assert len(filtrar_por_termo(self.CATALOGO, "0410000")) == 1
+
+    def test_termo_vazio_devolve_tudo(self):
+        from services.market_data.fas import filtrar_por_termo
+
+        assert len(filtrar_por_termo(self.CATALOGO, "")) == 3
+
+    def test_funciona_com_nomes_de_campo_diferentes(self):
+        """Se a API renomear as colunas, a busca continua achando."""
+        from services.market_data.fas import filtrar_por_termo
+
+        outro = [{"codigo": "2222000", "nome": "Oilseed, Soybean"}]
+        assert len(filtrar_por_termo(outro, "soybean")) == 1
+
+
 class TestSeguranca:
     def test_sem_chave_nao_tenta_rede(self, monkeypatch):
         monkeypatch.delenv(fas.VARIAVEL_DE_AMBIENTE, raising=False)
