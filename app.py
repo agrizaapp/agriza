@@ -1,3 +1,4 @@
+import html
 import io
 import json
 import zipfile
@@ -417,21 +418,26 @@ if page == "🏠 Início":
         generated_at = st.session_state.get(f"recommendation_generated_{season['id']}")
         if generated_at:
             st.caption(f"✓ Análise atualizada em {generated_at.strftime('%d/%m/%Y %H:%M')}")
+        # Os motivos vão dentro do próprio banner: com mercado e fundamentos na
+        # análise, eles são a parte mais informativa e não devem ficar escondidos.
+        # O texto é escapado porque entra como HTML.
+        motivos = "".join(
+            f"<li>{html.escape(str(detail))}</li>" for detail in rec["details"]
+        )
         st.markdown(
             f"""<div class="card {rec['level']}">
             <small>RECOMENDAÇÃO AGROIA</small>
             <h3>{rec['title']}</h3>
-            <div>{rec['message']}</div>
+            <div>{html.escape(rec['message'])}</div>
+            <div class="motivos-titulo">Por que</div>
+            <ul class="motivos">{motivos}</ul>
             </div>""",
             unsafe_allow_html=True,
         )
-        with st.expander("Ver os motivos"):
-            for detail in rec["details"]:
-                st.write("•", detail)
-            st.caption(
-                "A recomendação é apoio gerencial baseado nos dados cadastrados. "
-                "Não garante resultado e não substitui assessoria especializada."
-            )
+        st.caption(
+            "A recomendação é apoio gerencial baseado nos dados cadastrados. "
+            "Não garante resultado e não substitui assessoria especializada."
+        )
 
         commitments = q(
             """SELECT * FROM commitments

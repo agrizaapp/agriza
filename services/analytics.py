@@ -153,7 +153,13 @@ def agroia_recommendation(season):
     market = _market_context(season["crop"], required)
     if market:
         details.append(f"Cenário de mercado: {market['headline'].lower()}.")
-        details.extend(market["factors"][1:])  # o preço atual já consta acima
+        # A leitura de mercado repete cotação e preço necessário, porque no
+        # painel de Mercado ela aparece sozinha. Aqui esses dois já constam
+        # acima, e com os motivos visíveis no banner a repetição incomoda.
+        details.extend(
+            fator for fator in market["factors"][1:]
+            if "necessário" not in fator.lower()
+        )
 
     # Fundamento de oferta: entra como razão explícita, não como gatilho de
     # decisão. O nível continua ancorado em preço e pressão de caixa, que são

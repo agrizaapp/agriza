@@ -29,6 +29,9 @@ def apply_global_style():
         .brand{display:flex;align-items:center;min-height:3.2rem;font-size:2rem;font-weight:850;line-height:1.25;letter-spacing:-.04em;padding-top:.25rem;overflow:visible}
         .subbrand{opacity:.7;margin-top:.05rem;margin-bottom:.9rem;line-height:1.4}
         .card{border:1px solid rgba(60,90,45,.16);border-radius:18px;padding:1rem;margin:.55rem 0;background:rgba(255,255,255,.72)}
+        .motivos-titulo{margin-top:.9rem;font-size:.78rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;opacity:.6}
+        .motivos{margin:.35rem 0 0 0;padding-left:1.1rem;line-height:1.55}
+        .motivos li{margin:.28rem 0}
         .positive{border-left:6px solid #4F7D32}
         .warning{border-left:6px solid #D39B2A}
         .danger{border-left:6px solid #B74B45}
@@ -94,6 +97,8 @@ def apply_global_style():
                 min-height:4rem;
                 font-size:1.08rem;
             }
+            .motivos{padding-left:1rem;font-size:.98rem;line-height:1.6}
+            .motivos li{margin:.4rem 0}
             div[data-testid="stMetricValue"]{font-size:1.35rem!important}
             [class*="st-key-quote_summary"] div[data-testid="stMetricValue"]{font-size:1.15rem!important}
         }
