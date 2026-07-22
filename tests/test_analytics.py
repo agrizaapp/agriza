@@ -125,6 +125,17 @@ class TestFundamentoNaRecomendacao:
         assert "abaixo da média" in detalhes
         assert "sustentar o preço" in detalhes
 
+    def test_nao_repete_o_preco_necessario(self, safra):
+        """Com os motivos visíveis no banner, repetição fica evidente."""
+        from services.market_data.history import record_quote
+
+        self._cotacao()
+        for preco in [96, 98, 100, 103, 105]:
+            record_quote("Soja", preco, source="teste")
+        detalhes = agroia_recommendation(safra)["details"]
+        mencoes = [d for d in detalhes if "necessário" in d.lower()]
+        assert len(mencoes) == 1, f"preço necessário repetido: {mencoes}"
+
     def test_sem_fundamento_a_recomendacao_segue_igual(self, safra):
         """Ausência de dado externo não pode alterar o comportamento."""
         self._cotacao()
