@@ -95,6 +95,52 @@ class TestVinculoDeSafra:
         assert "R$ 0,00" in self._descoberto(safra)
 
 
+class TestFundamentoNaRecomendacao:
+    """O fundamento de oferta entra como razão explícita da recomendação."""
+
+    def _cotacao(self):
+        insert_id("INSERT INTO quotes(crop,price_sc,source) VALUES('Soja',100,'teste')", {})
+
+    def _safra_americana(self, valores):
+        from services.market_data.fundamentals_store import salvar_fundamento
+
+        for indice, valor in enumerate(valores):
+            salvar_fundamento({
+                "commodity": "SOYBEANS", "statistic": "YIELD", "unidade": "BU / ACRE",
+                "regiao": "UNITED STATES", "ano": 2021 + indice, "valor": valor,
+            })
+
+    def test_safra_grande_aparece_como_motivo(self, safra):
+        self._cotacao()
+        self._safra_americana([50.0, 50.0, 50.0, 60.0])
+        detalhes = " ".join(agroia_recommendation(safra)["details"])
+        assert "Safra americana" in detalhes
+        assert "acima da média" in detalhes
+        assert "pressionar o preço para baixo" in detalhes
+
+    def test_safra_pequena_aparece_como_motivo(self, safra):
+        self._cotacao()
+        self._safra_americana([50.0, 50.0, 50.0, 40.0])
+        detalhes = " ".join(agroia_recommendation(safra)["details"])
+        assert "abaixo da média" in detalhes
+        assert "sustentar o preço" in detalhes
+
+    def test_sem_fundamento_a_recomendacao_segue_igual(self, safra):
+        """Ausência de dado externo não pode alterar o comportamento."""
+        self._cotacao()
+        recomendacao = agroia_recommendation(safra)
+        assert not any("Safra americana" in d for d in recomendacao["details"])
+        assert recomendacao["title"]  # continua produzindo recomendação normal
+
+    def test_fundamento_nao_altera_o_nivel(self, safra):
+        """O nível segue ancorado em preço e pressão de caixa, por rastreabilidade."""
+        self._cotacao()
+        sem_fundamento = agroia_recommendation(safra)["level"]
+        self._safra_americana([50.0, 50.0, 50.0, 60.0])
+        com_fundamento = agroia_recommendation(safra)["level"]
+        assert sem_fundamento == com_fundamento
+
+
 def pytest_aprox(valor):
     import pytest
 
